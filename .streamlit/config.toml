@@ -6,7 +6,9 @@ textColor = "#1E1B2E"
 font = "sans serif"
 
 [client]
-toolbarMode = "minimal"
+# "viewer" hides the developer toolbar & Deploy card that Community Cloud
+# shows to the app owner ("minimal" still lets the cloud inject them).
+toolbarMode = "viewer"
 
 [server]
 address = "0.0.0.0"

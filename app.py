@@ -61,6 +61,7 @@ st.markdown(
       [data-testid="stToolbar"] { display: none !important; }
       [data-testid="stDecoration"] { display: none !important; }
       [data-testid="stStatusWidget"] { display: none !important; }
+      [data-testid="stAppDeployButton"] { display: none !important; }
       header[data-testid="stHeader"] { display: none !important; }
 
       /* Layout */
