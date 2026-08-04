@@ -133,17 +133,35 @@ def _call_ollama(config, prompt, temperature, num_predict):
 
     try:
         from ollama import chat
+        from ollama import ResponseError as OllamaResponseError
     except ImportError as exc:
         raise LLMError(
             "The 'ollama' Python package is not installed. "
             "Use an online provider instead."
         ) from exc
 
-    response = chat(
-        model=config.effective_model(),
-        messages=[{"role": "user", "content": prompt}],
-        options={"temperature": temperature, "num_predict": num_predict},
-    )
+    try:
+        response = chat(
+            model=config.effective_model(),
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": temperature, "num_predict": num_predict},
+        )
+    except OllamaResponseError as exc:
+        status = getattr(exc, "status_code", None)
+
+        if status == 404:
+            raise LLMError(
+                f"Local Ollama model {config.effective_model()!r} is not installed. "
+                f"Pull it with: ollama pull {config.effective_model()}"
+            ) from exc
+
+        raise LLMError(f"Local Ollama returned an error (HTTP {status}).") from exc
+    except ConnectionError as exc:
+        raise LLMError(
+            "Could not connect to the local Ollama server. "
+            "Start it with `ollama serve` (and pull the model), or switch the "
+            "AI Engine in the sidebar to an online provider."
+        ) from exc
 
     return response["message"]["content"]
 

@@ -445,10 +445,14 @@ with st.sidebar:
     # ----- AI Engine -----
     section_title("⚙️", "AI Engine")
 
+    # On the cloud host there is no local Ollama, so default to Online.
+    is_cloud = bool(os.environ.get("DATABASE_URL"))
+
     engine_choice = st.radio(
         "Engine",
         options=["🖥️ Local (Ollama)", "🌐 Online (Saved API Key)"],
         label_visibility="collapsed",
+        index=1 if is_cloud else 0,
     )
 
     provider = "ollama"
@@ -465,6 +469,11 @@ with st.sidebar:
                 "⚠️ No API key on your account yet — save one below "
                 "to use free online generation."
             )
+    elif is_cloud:
+        st.warning(
+            "⚠️ Local Ollama is not available on the cloud host. "
+            "Switch to Online, or run the app on your own machine."
+        )
 
     llm_config = LLMConfig(
         provider=provider,
