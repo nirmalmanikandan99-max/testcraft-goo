@@ -25,6 +25,9 @@ from src.config import (
     GROQ_FALLBACK_MODELS,
     GROQ_MODEL,
     MODEL_NAME,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_FALLBACK_MODELS,
+    OPENROUTER_MODEL,
 )
 
 DEFAULT_TIMEOUT = 180.0
@@ -49,6 +52,8 @@ class LLMConfig:
             return GEMINI_MODEL
         if self.provider == "groq":
             return GROQ_MODEL
+        if self.provider == "openrouter":
+            return OPENROUTER_MODEL
         return MODEL_NAME
 
     def __repr__(self):
@@ -60,15 +65,22 @@ def _openai_compatible_base(provider):
         return GEMINI_BASE_URL
     if provider == "groq":
         return GROQ_BASE_URL
+    if provider == "openrouter":
+        return OPENROUTER_BASE_URL
     raise LLMError(f"Unknown online provider: {provider}")
 
 
 def _model_candidates(config):
     """Configured model first, then known fallbacks for that provider."""
 
-    fallbacks = (
-        GEMINI_FALLBACK_MODELS if config.provider == "gemini" else GROQ_FALLBACK_MODELS
-    )
+    if config.provider == "gemini":
+        fallbacks = GEMINI_FALLBACK_MODELS
+    elif config.provider == "groq":
+        fallbacks = GROQ_FALLBACK_MODELS
+    elif config.provider == "openrouter":
+        fallbacks = OPENROUTER_FALLBACK_MODELS
+    else:
+        fallbacks = []
 
     # dict.fromkeys keeps order while de-duplicating.
     return list(dict.fromkeys([config.effective_model()] + fallbacks))
@@ -146,68 +158,86 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
     for model in candidates:
         tried_models.append(model)
 
-        body = {
-            "model": model,
-            "messages": _build_messages(prompt, system),
-            "temperature": temperature,
-            "max_tokens": num_predict,
-        }
+        use_json_mode = json_mode
 
-        if json_mode:
-            # Both providers require the word "json" somewhere in the prompt
-            # when this mode is on; all pipeline prompts already mention it.
-            body["response_format"] = {"type": "json_object"}
+        while True:
+            body = {
+                "model": model,
+                "messages": _build_messages(prompt, system),
+                "temperature": temperature,
+                "max_tokens": num_predict,
+            }
 
-        try:
-            # Full backoff only on the first model that rate-limits; later
-            # candidates (separate quota buckets) get one attempt each.
-            response = _post_with_429_backoff(
-                url, headers, body, max_attempts=3 if not saw_429 else 1
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
+            if use_json_mode:
+                # Both providers require the word "json" somewhere in the
+                # prompt when this mode is on; pipeline prompts mention it.
+                body["response_format"] = {"type": "json_object"}
 
-            if status == 404:
-                continue  # try the next known model ID
+            try:
+                # Full backoff only on the first model that rate-limits;
+                # later candidates (separate quota buckets) get one shot.
+                response = _post_with_429_backoff(
+                    url, headers, body, max_attempts=3 if not saw_429 else 1
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
 
-            if status == 429:
-                saw_429 = True
-                if model is not candidates[-1]:
-                    # Each candidate has its own free-tier request budget.
-                    time.sleep(3)
+                if status == 404:
+                    break  # try the next known model ID
+
+                if status == 429:
+                    saw_429 = True
+                    if model is not candidates[-1]:
+                        # Each candidate has its own free-tier request budget.
+                        time.sleep(3)
+                    break  # next model; after the loop a 429 message is raised
+
+                if status == 400 and use_json_mode:
+                    # Some (OpenRouter :free) models reject response_format;
+                    # retry the same model without it.
+                    use_json_mode = False
                     continue
+
+                if status == 402:
+                    raise LLMError(
+                        "OpenRouter: insufficient credits (402). Free-tier "
+                        "models must end in ':free', or add credits to your "
+                        "OpenRouter account."
+                    ) from exc
+
+                if status == 401:
+                    raise LLMError(
+                        "API key rejected (401). Double-check the key in the sidebar."
+                    ) from exc
+
+                raise LLMError(f"Provider returned HTTP {status}.") from exc
+            except httpx.ConnectError as exc:
                 raise LLMError(
-                    "Rate limit reached (429) on the free tier, even after "
-                    "automatic backoff retries across every candidate model. "
-                    "Per-minute limits reset within ~60s — wait a minute and "
-                    "retry. If 429s continue all day, the daily request limit "
-                    "(resets midnight Pacific) has been hit."
+                    "Could not reach the provider. Check your internet connection."
+                ) from exc
+            except httpx.TimeoutException as exc:
+                raise LLMError(
+                    "The provider timed out. The request may have been large — retry."
                 ) from exc
 
-            if status == 401:
+            try:
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, ValueError) as exc:
                 raise LLMError(
-                    "API key rejected (401). Double-check the key in the sidebar."
+                    f"Unexpected response shape from {config.provider}. "
+                    f"Raw: {response.text[:300]}"
                 ) from exc
 
-            raise LLMError(f"Provider returned HTTP {status}.") from exc
-        except httpx.ConnectError as exc:
-            raise LLMError(
-                "Could not reach the provider. Check your internet connection."
-            ) from exc
-        except httpx.TimeoutException as exc:
-            raise LLMError(
-                "The provider timed out. The request may have been large — retry."
-            ) from exc
-
-        try:
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, ValueError) as exc:
-            raise LLMError(
-                f"Unexpected response shape from {config.provider}. "
-                f"Raw: {response.text[:300]}"
-            ) from exc
+    if saw_429:
+        raise LLMError(
+            "Rate limit reached (429) on the free tier, even after automatic "
+            "backoff retries across every candidate model. Per-minute limits "
+            "reset within ~60s — wait a minute and retry. If 429s continue "
+            "all day, the daily request limit (resets midnight Pacific) has "
+            "been hit."
+        )
 
     raise LLMError(
         f"Model not found (404): none of the tried models exist on {config.provider}. "

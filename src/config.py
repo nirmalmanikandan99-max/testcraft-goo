@@ -36,6 +36,22 @@ GROQ_FALLBACK_MODELS = [
     "qwen3-32b",
 ]
 
+# OpenRouter — aggregation gateway. Models ending in :free cost nothing
+# (20 RPM; 50 req/day, or 1000/day after a one-time $10 credit top-up).
+# Each :free model has its own daily bucket, so the fallback chain also
+# multiplies the daily quota. Roster rotates frequently — verified live
+# against openrouter.ai/api/v1/models (14 :free models currently).
+OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+OPENROUTER_FALLBACK_MODELS = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free",
+    "openai/gpt-oss-20b:free",
+    "google/gemma-4-26b-a4b-it:free",
+]
+
 # Analysis and technique-selection are deterministic tasks -> low temperature.
 ANALYSIS_TEMPERATURE = 0.1
 

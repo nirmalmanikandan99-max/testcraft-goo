@@ -25,7 +25,26 @@ from src.auth import (
     clear_api_key,
 )
 from src.llm import LLMConfig, LLMError, test_connection, list_models
-from src.config import JSON_RETRIES
+from src.config import (
+    JSON_RETRIES,
+    GEMINI_MODEL,
+    GROQ_MODEL,
+    OPENROUTER_MODEL,
+)
+
+PROVIDER_OPTIONS = ["gemini", "groq", "openrouter"]
+
+PROVIDER_LABELS = {
+    "gemini": "🌍 Google Gemini (free tier)",
+    "groq": "⚡ Groq (free tier)",
+    "openrouter": "🔀 OpenRouter (free :free models)",
+}
+
+PROVIDER_DEFAULT_MODELS = {
+    "gemini": GEMINI_MODEL,
+    "groq": GROQ_MODEL,
+    "openrouter": OPENROUTER_MODEL,
+}
 
 # ------------------------------------------------------------------
 # Cloud secrets -> environment (Neon DB + encryption master key).
@@ -294,22 +313,18 @@ def render_auth_page():
                 with st.expander("🌍 AI API Key (optional)"):
                     st.caption(
                         "Skip this for now and add it later from the sidebar. "
-                        "Free keys: Gemini → aistudio.google.com · Groq → console.groq.com"
+                        "Free keys: Gemini → aistudio.google.com · "
+                        "Groq → console.groq.com · OpenRouter → openrouter.ai/keys"
                     )
                     api_provider = st.selectbox(
                         "Provider",
-                        options=["gemini", "groq"],
-                        format_func=lambda p: {
-                            "gemini": "🌍 Google Gemini (free tier)",
-                            "groq": "⚡ Groq (free tier)",
-                        }[p],
+                        options=PROVIDER_OPTIONS,
+                        format_func=lambda p: PROVIDER_LABELS[p],
                         key="signup_api_provider",
                     )
                     api_model = st.text_input(
                         "Model",
-                        value="gemini-3-flash"
-                        if api_provider == "gemini"
-                        else "llama-3.3-70b-versatile",
+                        value=PROVIDER_DEFAULT_MODELS[api_provider],
                         key="signup_api_model",
                     )
                     api_key_input = st.text_input(
@@ -500,18 +515,17 @@ with st.sidebar:
     ):
         key_provider = st.selectbox(
             "Provider",
-            options=["gemini", "groq"],
-            format_func=lambda p: {
-                "gemini": "🌍 Google Gemini (free tier)",
-                "groq": "⚡ Groq (free tier)",
-            }[p],
+            options=PROVIDER_OPTIONS,
+            format_func=lambda p: PROVIDER_LABELS[p],
             key="key_provider",
-            index=0 if (current_user.get("api_provider") or "gemini") == "gemini" else 1,
+            index=PROVIDER_OPTIONS.index(
+                (current_user.get("api_provider") or "gemini")
+                if (current_user.get("api_provider") or "gemini") in PROVIDER_OPTIONS
+                else "gemini"
+            ),
         )
 
-        key_default_model = (
-            "gemini-3-flash" if key_provider == "gemini" else "llama-3.3-70b-versatile"
-        )
+        key_default_model = PROVIDER_DEFAULT_MODELS[key_provider]
 
         key_model = st.text_input(
             "Model",

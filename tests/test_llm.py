@@ -55,6 +55,59 @@ def test_groq_chat_uses_groq_base_url():
     assert kwargs["json"]["model"] == "llama-3.3-70b-versatile"
 
 
+def test_openrouter_chat_uses_openrouter_base_url():
+    with mock.patch.object(
+        llm.httpx,
+        "post",
+        return_value=_fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ) as mocked_post:
+        llm.chat(LLMConfig(provider="openrouter", api_key="sk-or-123"), "Hi")
+
+    args, kwargs = mocked_post.call_args
+    assert args[0].startswith("https://openrouter.ai/api/v1")
+    assert kwargs["headers"]["Authorization"] == "Bearer sk-or-123"
+    assert kwargs["json"]["model"] == "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+
+def test_openrouter_400_retries_without_json_mode():
+    # Some :free models reject response_format -> 400; the layer must retry
+    # the same model without it and still return the content.
+    responses = [
+        _fake_response({"error": "response_format not supported"}, status=400),
+        _fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ]
+
+    with mock.patch.object(
+        llm.httpx, "post", side_effect=responses
+    ) as mocked_post:
+        result = llm.chat(
+            LLMConfig(provider="openrouter", api_key="k"),
+            "Return JSON",
+            json_mode=True,
+        )
+
+    assert result == "ok"
+    assert mocked_post.call_count == 2
+    first_body = mocked_post.call_args_list[0].kwargs["json"]
+    second_body = mocked_post.call_args_list[1].kwargs["json"]
+    assert "response_format" in first_body
+    assert "response_format" not in second_body
+
+
+def test_openrouter_402_raises_credits_error():
+    with mock.patch.object(
+        llm.httpx,
+        "post",
+        return_value=_fake_response({"error": "no credits"}, status=402),
+    ):
+        try:
+            llm.chat(LLMConfig(provider="openrouter", api_key="k"), "Hi")
+        except LLMError as exc:
+            assert "402" in str(exc) or "credits" in str(exc).lower()
+        else:
+            raise AssertionError("Expected LLMError")
+
+
 def test_missing_api_key_raises_friendly_error():
     try:
         llm.chat(LLMConfig(provider="gemini"), "Hi")
@@ -176,6 +229,10 @@ def test_ollama_routes_to_local_call():
 def test_default_models_per_provider():
     assert LLMConfig(provider="gemini").effective_model() == "gemini-3-flash"
     assert LLMConfig(provider="groq").effective_model() == "llama-3.3-70b-versatile"
+    assert (
+        LLMConfig(provider="openrouter").effective_model()
+        == "nvidia/nemotron-3-ultra-550b-a55b:free"
+    )
     assert LLMConfig().effective_model() == "qwen2.5:7b"
     assert LLMConfig(provider="gemini", model="custom").effective_model() == "custom"
 
