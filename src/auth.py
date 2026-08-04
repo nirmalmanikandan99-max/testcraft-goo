@@ -88,7 +88,17 @@ CREATE TABLE IF NOT EXISTS users (
 def init_db():
     """Create/upgrade the users table on whichever DB is active."""
 
-    with _get_connection() as conn:
+    conn = _get_connection()
+
+    # Run DDL in autocommit mode: on Postgres, a failed ALTER (e.g. the
+    # column already exists) aborts the whole transaction and silently
+    # rolls back the CREATE TABLE too.
+    if _is_postgres():
+        conn.autocommit = True
+    else:
+        conn.isolation_level = None
+
+    try:
         conn.execute(_CREATE_TABLE_POSTGRES if _is_postgres() else _CREATE_TABLE_SQLITE)
 
         # Migrate older DBs that predate the API-key columns.
@@ -101,6 +111,8 @@ def init_db():
                 conn.execute(f"ALTER TABLE users ADD COLUMN {column}")
             except Exception:
                 pass
+    finally:
+        conn.close()
 
 
 # ------------------------------------------------------------------
