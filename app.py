@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -24,6 +25,7 @@ from src.auth import (
     update_api_key,
     clear_api_key,
 )
+from src import llm as llm_mod
 from src.llm import LLMConfig, LLMError, test_connection, list_models
 from src.config import (
     JSON_RETRIES,
@@ -684,6 +686,95 @@ def _stage_with_retry(run_stage, status, stage_label):
     return None, raw
 
 
+def _build_generation_log(usage_sections, story_title, test_case_format, account_limits=None):
+    """
+    Render the downloadable generation log: per stage — model used, tokens
+    consumed, and the rate-limit/remaining-quota headers the provider
+    returned. usage_sections is a list of (stage_label, [usage events]).
+    """
+
+    lines = []
+    lines.append("=" * 64)
+    lines.append(" TestCraft Goo - Generation Log")
+    lines.append("=" * 64)
+    lines.append(f"Generated at      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"User Story        : {story_title}")
+    lines.append(f"Test Case Format  : {test_case_format}")
+
+    total_in = sum(e["prompt_tokens"] for _, evs in usage_sections for e in evs)
+    total_out = sum(e["completion_tokens"] for _, evs in usage_sections for e in evs)
+    total_calls = sum(len(evs) for _, evs in usage_sections)
+
+    lines.append(f"Total API calls   : {total_calls}")
+    lines.append(
+        f"Total tokens used : {total_in + total_out} "
+        f"(input {total_in} + output {total_out})"
+    )
+    lines.append("")
+
+    for stage_label, events in usage_sections:
+        lines.append("-" * 64)
+        lines.append(f"  {stage_label}")
+        lines.append("-" * 64)
+
+        if not events:
+            lines.append("  (no successful API call recorded for this stage)")
+            lines.append("")
+            continue
+
+        for event in events:
+            lines.append(f"  Model      : {event['provider']} / {event['model']}")
+            lines.append(
+                f"  Tokens     : input {event['prompt_tokens']} | "
+                f"output {event['completion_tokens']} | "
+                f"total {event['total_tokens']}"
+            )
+            limits = event.get("rate_limits") or {}
+            if limits:
+                lines.append("  Limit / quota remaining (from provider response):")
+                for key, value in limits.items():
+                    lines.append(f"    {key}: {value}")
+            else:
+                lines.append(
+                    "  Limit / quota remaining: not reported on this call"
+                )
+            lines.append("")
+
+    if account_limits:
+        lines.append("=" * 64)
+        lines.append("  Provider account status")
+        lines.append("=" * 64)
+        lines.append(
+            f"  Free tier         : "
+            f"{'yes' if account_limits.get('free_tier') else 'no'}"
+        )
+        lines.append(
+            f"  Credits used      : "
+            f"${float(account_limits.get('usage_usd') or 0):.6f}"
+        )
+        lines.append(
+            f"  Usage (daily)     : "
+            f"${float(account_limits.get('usage_daily_usd') or 0):.6f}"
+        )
+        lines.append(
+            "  Free-model budget : 50 requests/day (20/min); rises to "
+            "1,000/day after a one-time $10 credit top-up."
+        )
+        lines.append(
+            "  Note              : OpenRouter free models are request-based, "
+            "not token-based; token availability applies to Gemini/Groq."
+        )
+        lines.append("")
+
+    lines.append("=" * 64)
+    lines.append(
+        "Note: 'remaining' values come from the provider's own rate-limit "
+        "response headers; they are per-model free-tier budgets and reset "
+        "per minute / per day."
+    )
+    return "\n".join(lines)
+
+
 if generate_clicked:
 
     if fd is None:
@@ -729,11 +820,16 @@ TEST CASE FORMAT
 
         # Clear any previous run
         st.session_state.pop("results", None)
+        llm_mod.clear_usage_log()
+
+        # Usage events per pipeline stage, for the downloadable log.
+        usage_sections = []
 
         with st.status("Running generation pipeline...", expanded=True) as status:
 
             # ---- Stage 1: Requirement Analysis ----
             st.write("🔍 **Stage 1** — Analyzing requirements...")
+            usage_mark = len(llm_mod.usage_log())
             try:
                 requirement_json, requirement_raw = _stage_with_retry(
                     lambda hint: analyze_requirements(
@@ -746,6 +842,9 @@ TEST CASE FORMAT
                 status.update(label="❌ Requirement analysis failed", state="error")
                 st.error(f"❌ {exc}")
                 st.stop()
+            usage_sections.append(
+                ("Stage 1 - Requirement Analysis", llm_mod.usage_log()[usage_mark:])
+            )
 
             if requirement_json is None:
                 status.update(label="❌ Requirement analysis failed", state="error")
@@ -765,6 +864,7 @@ TEST CASE FORMAT
 
             # ---- Stage 2: Technique Selection ----
             st.write("🎯 **Stage 2** — Selecting testing techniques...")
+            usage_mark = len(llm_mod.usage_log())
             try:
                 technique_json, technique_raw = _stage_with_retry(
                     lambda hint: select_techniques(
@@ -777,6 +877,9 @@ TEST CASE FORMAT
                 status.update(label="❌ Technique selection failed", state="error")
                 st.error(f"❌ {exc}")
                 st.stop()
+            usage_sections.append(
+                ("Stage 2 - Technique Selection", llm_mod.usage_log()[usage_mark:])
+            )
 
             if technique_json is None:
                 status.update(label="❌ Technique selection failed", state="error")
@@ -793,6 +896,7 @@ TEST CASE FORMAT
 
             # ---- Stage 3: Test Case Generation ----
             st.write("🧪 **Stage 3** — Generating test cases...")
+            usage_mark = len(llm_mod.usage_log())
             try:
                 test_cases, testcases_raw = _stage_with_retry(
                     lambda hint: generate_testcases(
@@ -809,6 +913,9 @@ TEST CASE FORMAT
                 status.update(label="❌ Test case generation failed", state="error")
                 st.error(f"❌ {exc}")
                 st.stop()
+            usage_sections.append(
+                ("Stage 3 - Test Case Generation", llm_mod.usage_log()[usage_mark:])
+            )
 
             if test_cases is None:
                 status.update(label="❌ Test case generation failed", state="error")
@@ -840,11 +947,22 @@ TEST CASE FORMAT
             status.update(label="✅ Test cases generated successfully", state="complete")
 
         # Persist results so they survive reruns (e.g. after download click)
+        account_limits = (
+            llm_mod.fetch_provider_limits(llm_config)
+            if provider == "openrouter" and api_key
+            else None
+        )
+
+        log_text = _build_generation_log(
+            usage_sections, story_title, test_case_format, account_limits
+        )
+
         st.session_state["results"] = {
             "requirement_json": requirement_json,
             "technique_json": technique_json,
             "test_cases": test_cases,
             "excel_bytes": excel_bytes,
+            "log_bytes": log_text.encode("utf-8"),
             "format": test_case_format,
         }
 
@@ -877,6 +995,15 @@ if "results" in st.session_state:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
+    if results.get("log_bytes"):
+        st.download_button(
+            label="📄 Download Generation Log (model · tokens used · quota remaining)",
+            data=results["log_bytes"],
+            file_name="Generation_Log.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
     st.markdown("")
 

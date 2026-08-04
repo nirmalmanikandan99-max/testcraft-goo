@@ -32,6 +32,49 @@ from src.config import (
 
 DEFAULT_TIMEOUT = 180.0
 
+# Usage events collected from every successful provider call in the current
+# pipeline run (model used, token counts, rate-limit headers). Cleared by
+# app.py at the start of each generation so the downloadable log only shows
+# the current run.
+_usage_events = []
+
+
+def clear_usage_log():
+    """Reset the usage collector (call at the start of a pipeline run)."""
+    _usage_events.clear()
+
+
+def usage_log():
+    """Snapshot of usage events for the current run."""
+    return list(_usage_events)
+
+
+def _record_usage(provider, model, headers, usage=None):
+    """Append one provider call's usage facts (tokens + rate-limit headers)."""
+
+    usage = usage or {}
+
+    def _int(key):
+        try:
+            return int(usage.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    entry = {
+        "provider": provider,
+        "model": model,
+        "prompt_tokens": _int("prompt_tokens"),
+        "completion_tokens": _int("completion_tokens"),
+        "total_tokens": _int("total_tokens"),
+        "rate_limits": {},
+    }
+
+    for key, value in headers.items():
+        if "ratelimit" in key.lower() or "retry-after" in key.lower():
+            entry["rate_limits"][key] = value
+
+    _usage_events.append(entry)
+
 
 class LLMError(Exception):
     """Raised when a provider call fails (auth, network, rate limit, ...)."""
@@ -223,12 +266,21 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
 
             try:
                 data = response.json()
-                return data["choices"][0]["message"]["content"]
+                content = data["choices"][0]["message"]["content"]
             except (KeyError, IndexError, ValueError) as exc:
                 raise LLMError(
                     f"Unexpected response shape from {config.provider}. "
                     f"Raw: {response.text[:300]}"
                 ) from exc
+
+            _record_usage(
+                config.provider,
+                body["model"],
+                response.headers,
+                data.get("usage") or {},
+            )
+
+            return content
 
     if saw_429:
         raise LLMError(
@@ -244,6 +296,38 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
         f"Tried: {', '.join(tried_models)}. "
         "Check the model name in the AI Engine section of the sidebar."
     )
+
+
+def fetch_provider_limits(config):
+    """Account-level quota snapshot, for the downloadable generation log.
+
+    Gemini/Groq report remaining quota through per-response rate-limit
+    headers, which the usage log captures per stage. OpenRouter does not
+    send such headers, so query its /auth/key endpoint once instead.
+    Returns a dict, or None when not applicable / unavailable.
+    """
+
+    if config.provider != "openrouter" or not config.api_key.strip():
+        return None
+
+    try:
+        response = httpx.get(
+            f"{OPENROUTER_BASE_URL}/auth/key",
+            headers={"Authorization": f"Bearer {config.api_key.strip()}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        return {
+            "provider": "openrouter",
+            "free_tier": bool(data.get("is_free_tier")),
+            "usage_usd": data.get("usage"),
+            "usage_daily_usd": data.get("usage_daily"),
+            "usage_weekly_usd": data.get("usage_weekly"),
+            "usage_monthly_usd": data.get("usage_monthly"),
+        }
+    except Exception:
+        return None
 
 
 def list_models(config):
@@ -315,6 +399,18 @@ def _call_ollama(config, prompt, temperature, num_predict, system=None, json_mod
             "Start it with `ollama serve` (and pull the model), or switch the "
             "AI Engine in the sidebar to an online provider."
         ) from exc
+
+    _record_usage(
+        config.provider,
+        config.effective_model(),
+        {},
+        {
+            "prompt_tokens": int(response.get("prompt_eval_count") or 0),
+            "completion_tokens": int(response.get("eval_count") or 0),
+            "total_tokens": int(response.get("prompt_eval_count") or 0)
+            + int(response.get("eval_count") or 0),
+        },
+    )
 
     return response["message"]["content"]
 

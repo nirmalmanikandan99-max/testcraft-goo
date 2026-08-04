@@ -32,3 +32,6 @@ current_url.txt
 .claude/
 
 debug_pipeline.py
+debug_usage.py
+debug_probe.py
+debug_headers.py

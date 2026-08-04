@@ -108,6 +108,101 @@ def test_openrouter_402_raises_credits_error():
             raise AssertionError("Expected LLMError")
 
 
+def test_usage_log_records_model_tokens_and_rate_limits():
+    llm.clear_usage_log()
+
+    response = httpx.Response(
+        200,
+        json={
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+            },
+        },
+        headers={
+            "x-ratelimit-remaining-requests": "8",
+            "x-ratelimit-limit-tokens": "250000",
+            "x-ratelimit-remaining-tokens": "249000",
+        },
+        request=httpx.Request("POST", "http://fake"),
+    )
+
+    with mock.patch.object(llm.httpx, "post", return_value=response):
+        llm.chat(LLMConfig(provider="gemini", api_key="k", model="gemini-3-flash"), "Hi")
+
+    events = llm.usage_log()
+    assert len(events) == 1
+
+    event = events[0]
+    assert event["provider"] == "gemini"
+    assert event["model"] == "gemini-3-flash"
+    assert event["prompt_tokens"] == 10
+    assert event["completion_tokens"] == 20
+    assert event["total_tokens"] == 30
+    assert event["rate_limits"]["x-ratelimit-remaining-requests"] == "8"
+    assert event["rate_limits"]["x-ratelimit-remaining-tokens"] == "249000"
+
+    llm.clear_usage_log()
+    assert llm.usage_log() == []
+
+
+def test_usage_log_records_fallback_model_used():
+    llm.clear_usage_log()
+
+    # Configured model 404s; fallback succeeds -> log must record the
+    # fallback model that actually answered.
+    responses = [
+        _fake_response({"error": "nope"}, status=404),
+        _fake_response(
+            {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+            }
+        ),
+    ]
+
+    with mock.patch.object(llm.httpx, "post", side_effect=responses):
+        llm.chat(LLMConfig(provider="gemini", api_key="k", model="stale-model"), "Hi")
+
+    events = llm.usage_log()
+    assert len(events) == 1
+    assert events[0]["model"] != "stale-model"
+
+    llm.clear_usage_log()
+
+
+def test_fetch_provider_limits_openrouter():
+    with mock.patch.object(
+        llm.httpx,
+        "get",
+        return_value=_fake_response(
+            {
+                "data": {
+                    "is_free_tier": True,
+                    "usage": 0,
+                    "usage_daily": 0,
+                    "usage_weekly": 0,
+                    "usage_monthly": 0,
+                }
+            }
+        ),
+    ) as mocked_get:
+        limits = llm.fetch_provider_limits(
+            LLMConfig(provider="openrouter", api_key="sk-or-123")
+        )
+
+    assert limits["free_tier"] is True
+    assert limits["usage_usd"] == 0
+    assert mocked_get.call_args.args[0] == "https://openrouter.ai/api/v1/auth/key"
+
+
+def test_fetch_provider_limits_returns_none_elsewhere():
+    assert llm.fetch_provider_limits(LLMConfig(provider="gemini", api_key="k")) is None
+    assert llm.fetch_provider_limits(LLMConfig(provider="openrouter")) is None
+
+
 def test_missing_api_key_raises_friendly_error():
     try:
         llm.chat(LLMConfig(provider="gemini"), "Hi")
