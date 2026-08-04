@@ -13,6 +13,8 @@ httpx call shape covers both. httpx is already a project dependency.
 API keys are only ever passed in memory (per-session) — never persisted.
 """
 
+import time
+
 import httpx
 
 from src.config import (
@@ -81,6 +83,39 @@ def _build_messages(prompt, system=None):
     return [{"role": "user", "content": prompt}]
 
 
+def _post_with_429_backoff(url, headers, body):
+    """POST, retrying on 429 (free-tier rate limit) with backoff.
+
+    Free tiers (Gemini/Groq) throttle bursts; a short wait usually clears
+    the limit. Honors the Retry-After header when the provider sends one,
+    otherwise waits 5s / 20s / 45s across up to 3 attempts.
+    """
+
+    fallback_waits = (5.0, 20.0, 45.0)
+    max_attempts = len(fallback_waits)
+
+    for attempt in range(1, max_attempts + 1):
+        response = httpx.post(url, headers=headers, json=body, timeout=DEFAULT_TIMEOUT)
+
+        if response.status_code != 429 or attempt == max_attempts:
+            return response
+
+        wait = 0.0
+        retry_after = response.headers.get("retry-after", "")
+        try:
+            wait = float(retry_after)
+        except ValueError:
+            wait = 0.0
+
+        if wait <= 0:
+            wait = fallback_waits[attempt - 1]
+
+        wait = min(wait, 60.0)
+        time.sleep(wait)
+
+    return response
+
+
 def _call_http_provider(config, prompt, temperature, num_predict, system=None, json_mode=False):
     """POST to an OpenAI-compatible endpoint (Gemini / Groq).
 
@@ -122,12 +157,7 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
             body["response_format"] = {"type": "json_object"}
 
         try:
-            response = httpx.post(
-                url,
-                headers=headers,
-                json=body,
-                timeout=DEFAULT_TIMEOUT,
-            )
+            response = _post_with_429_backoff(url, headers, body)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
@@ -141,8 +171,9 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
                 ) from exc
             if status == 429:
                 raise LLMError(
-                    "Rate limit reached (429) on the free tier. "
-                    "Wait a minute and retry, or switch provider."
+                    "Rate limit reached (429) on the free tier even after "
+                    "automatic backoff retries. Wait a minute and try again, "
+                    "or switch provider."
                 ) from exc
 
             raise LLMError(f"Provider returned HTTP {status}.") from exc

@@ -21,7 +21,7 @@ import sqlite3
 import hashlib
 import secrets
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 DB_PATH = Path(os.environ.get("AUTH_DB_PATH", "users.db"))
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -249,7 +249,7 @@ def create_user(first_name, last_name, email, phone, password, api_provider="gem
                 phone,
                 password_hash,
                 salt,
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
                 api_provider.strip() or "gemini",
                 api_model.strip(),
                 api_key_encrypted,

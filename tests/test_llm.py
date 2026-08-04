@@ -83,13 +83,48 @@ def test_rate_limit_raises_friendly_error():
         llm.httpx,
         "post",
         return_value=_fake_response({"error": "slow down"}, status=429),
-    ):
+    ), mock.patch.object(llm.time, "sleep") as mocked_sleep:
         try:
             llm.chat(LLMConfig(provider="groq", api_key="k"), "Hi")
         except LLMError as exc:
             assert "429" in str(exc)
+            assert mocked_sleep.call_count == 2  # backed off twice
         else:
             raise AssertionError("Expected LLMError")
+
+
+def test_429_retries_until_success():
+    # Two 429s, then a good response: backoff must wait and succeed.
+    responses = [
+        _fake_response({"error": "slow down"}, status=429),
+        _fake_response({"error": "slow down"}, status=429),
+        _fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ]
+
+    with mock.patch.object(
+        llm.httpx, "post", side_effect=responses
+    ) as mocked_post, mock.patch.object(llm.time, "sleep"):
+        result = llm.chat(LLMConfig(provider="gemini", api_key="k"), "Hi")
+
+    assert result == "ok"
+    assert mocked_post.call_count == 3
+
+
+def test_429_respects_retry_after_header():
+    response = httpx.Response(
+        429,
+        json={"error": "slow down"},
+        headers={"retry-after": "3"},
+        request=httpx.Request("POST", "http://fake"),
+    )
+
+    with mock.patch.object(
+        llm.httpx, "post", side_effect=[response, _fake_response({"choices": [{"message": {"content": "ok"}}]})]
+    ) as mocked_post, mock.patch.object(llm.time, "sleep") as mocked_sleep:
+        result = llm.chat(LLMConfig(provider="groq", api_key="k"), "Hi")
+
+    assert result == "ok"
+    assert mocked_sleep.call_args.args[0] == 3.0
 
 
 def test_connect_error_raises_friendly_error():
@@ -115,7 +150,7 @@ def test_ollama_routes_to_local_call():
 
 
 def test_default_models_per_provider():
-    assert LLMConfig(provider="gemini").effective_model() == "gemini-2.5-flash"
+    assert LLMConfig(provider="gemini").effective_model() == "gemini-3-flash"
     assert LLMConfig(provider="groq").effective_model() == "llama-3.3-70b-versatile"
     assert LLMConfig().effective_model() == "qwen2.5:7b"
     assert LLMConfig(provider="gemini", model="custom").effective_model() == "custom"
