@@ -54,6 +54,11 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+      /* Hide Streamlit chrome: menu, "Made with Streamlit" / "Created by" footer */
+      #MainMenu { visibility: hidden; }
+      footer { visibility: hidden; }
+      [data-testid="stFooter"] { display: none; }
+
       /* Layout */
       .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1180px; }
 
