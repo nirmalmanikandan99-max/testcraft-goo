@@ -54,10 +54,14 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      /* Hide Streamlit chrome: menu, "Made with Streamlit" / "Created by" footer */
-      #MainMenu { visibility: hidden; }
-      footer { visibility: hidden; }
-      [data-testid="stFooter"] { display: none; }
+      /* Hide Streamlit chrome: menu, footer, "Created by", Deploy bar */
+      #MainMenu { display: none !important; }
+      footer { display: none !important; }
+      [data-testid="stFooter"] { display: none !important; }
+      [data-testid="stToolbar"] { display: none !important; }
+      [data-testid="stDecoration"] { display: none !important; }
+      [data-testid="stStatusWidget"] { display: none !important; }
+      header[data-testid="stHeader"] { display: none !important; }
 
       /* Layout */
       .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1180px; }
