@@ -42,10 +42,12 @@ ANALYSIS_TEMPERATURE = 0.1
 # Test-case generation benefits from slightly more variety.
 GENERATION_TEMPERATURE = 0.2
 
-# Token budget per stage. Generation needs generous headroom so large
-# JSON arrays are not truncated mid-array.
-ANALYSIS_NUM_PREDICT = 1024
-GENERATION_NUM_PREDICT = 4096
+# Token budget per stage. Gemini 3.x models "think" before answering and the
+# thinking tokens count against max_tokens, so a budget that merely fits the
+# JSON gets truncated mid-array on long-thinking calls. 16384 leaves headroom
+# for both thinking and the full JSON (accepted by Gemini and Groq).
+ANALYSIS_NUM_PREDICT = 16384
+GENERATION_NUM_PREDICT = 16384
 
 # System instruction prepended to every pipeline call: these tasks must
 # produce parseable JSON, and frontier chat models often drift into
