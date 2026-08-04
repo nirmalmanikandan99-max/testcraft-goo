@@ -72,7 +72,16 @@ def _model_candidates(config):
     return list(dict.fromkeys([config.effective_model()] + fallbacks))
 
 
-def _call_http_provider(config, prompt, temperature, num_predict):
+def _build_messages(prompt, system=None):
+    if system:
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+    return [{"role": "user", "content": prompt}]
+
+
+def _call_http_provider(config, prompt, temperature, num_predict, system=None):
     """POST to an OpenAI-compatible endpoint (Gemini / Groq).
 
     On a 404 (model not found/renamed), retries known fallback model IDs
@@ -99,7 +108,7 @@ def _call_http_provider(config, prompt, temperature, num_predict):
 
         body = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": _build_messages(prompt, system),
             "temperature": temperature,
             "max_tokens": num_predict,
         }
@@ -185,7 +194,7 @@ def list_models(config):
         return []
 
 
-def _call_ollama(config, prompt, temperature, num_predict):
+def _call_ollama(config, prompt, temperature, num_predict, system=None):
     """Local Ollama fallback (no internet required)."""
 
     try:
@@ -200,7 +209,7 @@ def _call_ollama(config, prompt, temperature, num_predict):
     try:
         response = chat(
             model=config.effective_model(),
-            messages=[{"role": "user", "content": prompt}],
+            messages=_build_messages(prompt, system),
             options={"temperature": temperature, "num_predict": num_predict},
         )
     except OllamaResponseError as exc:
@@ -223,18 +232,22 @@ def _call_ollama(config, prompt, temperature, num_predict):
     return response["message"]["content"]
 
 
-def chat(config, prompt, temperature=0.1, num_predict=4096):
+def chat(config, prompt, temperature=0.1, num_predict=4096, system=None):
     """
     Send a single-turn prompt to the configured provider.
+
+    ``system`` (optional) is prepended as a system-role message, which is
+    more reliable at enforcing output rules (e.g. strict JSON) than a note
+    buried in the user prompt.
 
     Returns the raw text response. Raises LLMError with a user-friendly
     message on any failure so the UI can show it directly.
     """
 
     if config.provider == "ollama":
-        return _call_ollama(config, prompt, temperature, num_predict)
+        return _call_ollama(config, prompt, temperature, num_predict, system)
 
-    return _call_http_provider(config, prompt, temperature, num_predict)
+    return _call_http_provider(config, prompt, temperature, num_predict, system)
 
 
 def test_connection(config):

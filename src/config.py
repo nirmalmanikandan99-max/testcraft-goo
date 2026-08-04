@@ -46,3 +46,15 @@ GENERATION_TEMPERATURE = 0.2
 # JSON arrays are not truncated mid-array.
 ANALYSIS_NUM_PREDICT = 300
 GENERATION_NUM_PREDICT = 4096
+
+# System instruction prepended to every pipeline call: these tasks must
+# produce parseable JSON, and frontier chat models often drift into
+# markdown or prose without an explicit system role.
+SYSTEM_JSON_RULE = (
+    "You are an expert QA automation assistant. You always respond with ONE "
+    "valid JSON object or array and nothing else. No markdown code fences, "
+    "no explanations, no extra text outside the JSON."
+)
+
+# How many times a stage re-calls the model when its JSON fails to parse.
+JSON_RETRIES = 3

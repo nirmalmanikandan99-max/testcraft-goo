@@ -24,6 +24,7 @@ from src.auth import (
     clear_api_key,
 )
 from src.llm import LLMConfig, LLMError, test_connection, list_models
+from src.config import JSON_RETRIES
 
 # ------------------------------------------------------------------
 # Cloud secrets -> environment (Neon DB + encryption master key).
@@ -632,6 +633,42 @@ generate_clicked = st.button("🚀 Generate Test Cases", use_container_width=Tru
 # Generation Pipeline
 # ==========================================================
 
+def _stage_with_retry(run_stage, status, stage_label):
+    """
+    Run one pipeline stage (a callable taking an optional retry_hint).
+
+    Models occasionally answer with prose/markdown instead of JSON. When the
+    parse fails, re-call with the failed output fed back as a correction
+    hint, up to JSON_RETRIES attempts. Returns (parsed_json, raw_text);
+    parsed_json is None if every attempt failed.
+    """
+
+    raw = ""
+    for attempt in range(1, JSON_RETRIES + 1):
+        if attempt > 1:
+            st.write(
+                f"⚠️ {stage_label} response was not valid JSON — "
+                f"correcting and retrying ({attempt}/{JSON_RETRIES})..."
+            )
+
+        retry_hint = None
+        if attempt > 1:
+            retry_hint = (
+                "Your previous response could not be parsed as JSON — the "
+                "application rejected it. Return ONLY a single valid JSON "
+                "object or array this time: no markdown code fences, no "
+                "explanations, nothing before or after the JSON.\n"
+                f"Preview of your invalid response: {raw[:300]}"
+            )
+
+        raw = run_stage(retry_hint)
+        parsed = validate_json(raw)
+        if parsed is not None:
+            return parsed, raw
+
+    return None, raw
+
+
 if generate_clicked:
 
     if fd is None:
@@ -683,16 +720,24 @@ TEST CASE FORMAT
             # ---- Stage 1: Requirement Analysis ----
             st.write("🔍 **Stage 1** — Analyzing requirements...")
             try:
-                requirement_raw = analyze_requirements(complete_context, llm_config)
+                requirement_json, requirement_raw = _stage_with_retry(
+                    lambda hint: analyze_requirements(
+                        complete_context, llm_config, retry_hint=hint
+                    ),
+                    status,
+                    "Requirement analysis",
+                )
             except LLMError as exc:
                 status.update(label="❌ Requirement analysis failed", state="error")
                 st.error(f"❌ {exc}")
                 st.stop()
-            requirement_json = validate_json(requirement_raw)
 
             if requirement_json is None:
                 status.update(label="❌ Requirement analysis failed", state="error")
-                st.error("Requirement analysis returned invalid JSON. Please try again.")
+                st.error(
+                    f"Requirement analysis returned invalid JSON after "
+                    f"{JSON_RETRIES} attempts. Please try again."
+                )
                 with st.expander("View raw model output"):
                     st.code(requirement_raw)
                 st.stop()
@@ -700,16 +745,24 @@ TEST CASE FORMAT
             # ---- Stage 2: Technique Selection ----
             st.write("🎯 **Stage 2** — Selecting testing techniques...")
             try:
-                technique_raw = select_techniques(requirement_json, llm_config)
+                technique_json, technique_raw = _stage_with_retry(
+                    lambda hint: select_techniques(
+                        requirement_json, llm_config, retry_hint=hint
+                    ),
+                    status,
+                    "Technique selection",
+                )
             except LLMError as exc:
                 status.update(label="❌ Technique selection failed", state="error")
                 st.error(f"❌ {exc}")
                 st.stop()
-            technique_json = validate_json(technique_raw)
 
             if technique_json is None:
                 status.update(label="❌ Technique selection failed", state="error")
-                st.error("Technique selection returned invalid JSON. Please try again.")
+                st.error(
+                    f"Technique selection returned invalid JSON after "
+                    f"{JSON_RETRIES} attempts. Please try again."
+                )
                 with st.expander("View raw model output"):
                     st.code(technique_raw)
                 st.stop()
@@ -717,21 +770,28 @@ TEST CASE FORMAT
             # ---- Stage 3: Test Case Generation ----
             st.write("🧪 **Stage 3** — Generating test cases...")
             try:
-                testcases_raw = generate_testcases(
-                    requirement_json,
-                    technique_json,
-                    test_case_format,
-                    llm_config,
+                test_cases, testcases_raw = _stage_with_retry(
+                    lambda hint: generate_testcases(
+                        requirement_json,
+                        technique_json,
+                        test_case_format,
+                        llm_config,
+                        retry_hint=hint,
+                    ),
+                    status,
+                    "Test case generation",
                 )
             except LLMError as exc:
                 status.update(label="❌ Test case generation failed", state="error")
                 st.error(f"❌ {exc}")
                 st.stop()
-            test_cases = validate_json(testcases_raw)
 
             if test_cases is None:
                 status.update(label="❌ Test case generation failed", state="error")
-                st.error("Test case generation returned invalid JSON. Please try again.")
+                st.error(
+                    f"Test case generation returned invalid JSON after "
+                    f"{JSON_RETRIES} attempts. Please try again."
+                )
                 with st.expander("View raw model output"):
                     st.code(testcases_raw)
                 st.stop()

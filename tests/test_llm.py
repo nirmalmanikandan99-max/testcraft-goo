@@ -178,3 +178,29 @@ def test_list_models_returns_ids():
 def test_list_models_empty_without_key():
     assert llm.list_models(LLMConfig(provider="gemini")) == []
     assert llm.list_models(LLMConfig()) == []
+
+
+def test_chat_prepends_system_message():
+    with mock.patch.object(
+        llm.httpx, "post", return_value=_fake_response({"choices": [{"message": {"content": "ok"}}]})
+    ) as mocked_post:
+        llm.chat(
+            LLMConfig(provider="gemini", api_key="k"),
+            "Make JSON",
+            system="You only output JSON.",
+        )
+
+    messages = mocked_post.call_args.kwargs["json"]["messages"]
+    assert messages[0] == {"role": "system", "content": "You only output JSON."}
+    assert messages[1] == {"role": "user", "content": "Make JSON"}
+
+
+def test_chat_without_system_has_only_user_message():
+    with mock.patch.object(
+        llm.httpx, "post", return_value=_fake_response({"choices": [{"message": {"content": "ok"}}]})
+    ) as mocked_post:
+        llm.chat(LLMConfig(provider="groq", api_key="k"), "Hi")
+
+    messages = mocked_post.call_args.kwargs["json"]["messages"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"

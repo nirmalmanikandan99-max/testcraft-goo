@@ -1,12 +1,12 @@
 from pathlib import Path
 
 from src import llm
-from src.config import ANALYSIS_NUM_PREDICT, ANALYSIS_TEMPERATURE
+from src.config import ANALYSIS_NUM_PREDICT, ANALYSIS_TEMPERATURE, SYSTEM_JSON_RULE
 
 PROMPT_FILE = Path("prompts") / "requirement_analysis_prompt.txt"
 
 
-def analyze_requirements(context, llm_config=None):
+def analyze_requirements(context, llm_config=None, retry_hint=None):
 
     print("Step 1 - Reading Prompt")
 
@@ -27,6 +27,9 @@ PROJECT CONTEXT
 {context}
 """
 
+    if retry_hint:
+        full_prompt += f"\n\n{retry_hint}\n"
+
     print("Step 3 - Calling LLM")
 
     response = llm.chat(
@@ -34,6 +37,7 @@ PROJECT CONTEXT
         full_prompt,
         temperature=ANALYSIS_TEMPERATURE,
         num_predict=ANALYSIS_NUM_PREDICT,
+        system=SYSTEM_JSON_RULE,
     )
 
     print("Step 4 - Response Received")
