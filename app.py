@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -12,8 +13,28 @@ from src.technique_selector import select_techniques
 from src.testcase_generator import generate_testcases
 from src.json_validator import validate_json
 from src.excel_generator import generate_excel
-from src.auth import init_db, create_user, authenticate_user, validate_signup_fields
+from src.auth import (
+    init_db,
+    create_user,
+    authenticate_user,
+    validate_signup_fields,
+    get_user_by_id,
+    get_api_key,
+    update_api_key,
+    clear_api_key,
+)
 from src.llm import LLMConfig, LLMError, test_connection
+
+# ------------------------------------------------------------------
+# Cloud secrets -> environment (Neon DB + encryption master key).
+# Local development keeps SQLite + a generated .encryption_key file.
+# ------------------------------------------------------------------
+
+if not os.environ.get("DATABASE_URL") and "DATABASE_URL" in st.secrets:
+    os.environ["DATABASE_URL"] = st.secrets["DATABASE_URL"]
+
+if not os.environ.get("ENCRYPTION_KEY") and "ENCRYPTION_KEY" in st.secrets:
+    os.environ["ENCRYPTION_KEY"] = st.secrets["ENCRYPTION_KEY"]
 
 # ==========================================================
 # Page Configuration
@@ -258,6 +279,34 @@ def render_auth_page():
                     "Confirm Password", type="password", placeholder="Re-enter password"
                 )
 
+                with st.expander("🌍 AI API Key (optional)"):
+                    st.caption(
+                        "Skip this for now and add it later from the sidebar. "
+                        "Free keys: Gemini → aistudio.google.com · Groq → console.groq.com"
+                    )
+                    api_provider = st.selectbox(
+                        "Provider",
+                        options=["gemini", "groq"],
+                        format_func=lambda p: {
+                            "gemini": "🌍 Google Gemini (free tier)",
+                            "groq": "⚡ Groq (free tier)",
+                        }[p],
+                        key="signup_api_provider",
+                    )
+                    api_model = st.text_input(
+                        "Model",
+                        value="gemini-2.5-flash"
+                        if api_provider == "gemini"
+                        else "llama-3.3-70b-versatile",
+                        key="signup_api_model",
+                    )
+                    api_key_input = st.text_input(
+                        "API Key",
+                        type="password",
+                        placeholder="Paste your free API key here",
+                        key="signup_api_key",
+                    )
+
                 if st.button("✅ Create Account", use_container_width=True):
 
                     error = validate_signup_fields(
@@ -267,7 +316,16 @@ def render_auth_page():
                     if error:
                         st.error(f"⚠️ {error}")
                     else:
-                        success, message = create_user(first_name, last_name, email, phone, password)
+                        success, message = create_user(
+                            first_name,
+                            last_name,
+                            email,
+                            phone,
+                            password,
+                            api_provider=api_provider,
+                            api_model=api_model.strip(),
+                            api_key=api_key_input,
+                        )
 
                         if success:
                             st.success(f"✅ {message} Please switch to Login above.")
@@ -379,7 +437,7 @@ with st.sidebar:
 
     engine_choice = st.radio(
         "Engine",
-        options=["🖥️ Local (Ollama)", "🌐 Online (API Key)"],
+        options=["🖥️ Local (Ollama)", "🌐 Online (Saved API Key)"],
         label_visibility="collapsed",
     )
 
@@ -388,58 +446,20 @@ with st.sidebar:
     api_key = ""
 
     if engine_choice.startswith("🌐"):
+        provider = current_user.get("api_provider") or "gemini"
+        model = current_user.get("api_model") or ""
+        api_key = get_api_key(current_user["id"])
 
-        provider = st.selectbox(
-            "Provider",
-            options=["gemini", "groq"],
-            format_func=lambda p: {
-                "gemini": "🌍 Google Gemini (free tier)",
-                "groq": "⚡ Groq (free tier)",
-            }[p],
-        )
-
-        default_model = (
-            "gemini-2.5-flash" if provider == "gemini" else "llama-3.3-70b-versatile"
-        )
-
-        model = st.text_input("Model", value=default_model)
-
-        signup_url = "aistudio.google.com" if provider == "gemini" else "console.groq.com"
-
-        api_key = st.text_input(
-            "Your API Key",
-            type="password",
-            placeholder=f"Free key from {signup_url} — never stored",
-        )
-
-        if st.button("🔌 Test Connection", use_container_width=True):
-            if not api_key.strip():
-                st.error("⚠️ Please paste an API key first.")
-            else:
-                with st.spinner("Testing connection..."):
-                    ok, message = test_connection(
-                        LLMConfig(
-                            provider=provider,
-                            api_key=api_key.strip(),
-                            model=model.strip(),
-                        )
-                    )
-                if ok:
-                    st.success(f"✅ {message}")
-                else:
-                    st.error(f"❌ {message}")
-
-        st.caption(
-            "Free per-user quota (Gemini ~1M tokens/day, Groq ~14k calls/day). "
-            "Bring your own key — it stays in memory for this session only."
-        )
-    else:
-        st.caption("Uses the local Ollama model — no internet needed, works offline.")
+        if not current_user.get("has_api_key"):
+            st.warning(
+                "⚠️ No API key on your account yet — save one below "
+                "to use free online generation."
+            )
 
     llm_config = LLMConfig(
         provider=provider,
-        api_key=api_key.strip(),
-        model=model.strip(),
+        api_key=api_key,
+        model=model,
     )
 
     engine_label = (
@@ -447,6 +467,85 @@ with st.sidebar:
         if provider != "ollama"
         else "a local Ollama model (offline)"
     )
+
+    st.markdown("---")
+
+    # ----- Per-user API key management -----
+    section_title("🔑", "My AI API Key")
+
+    with st.expander(
+        "Manage my key",
+        expanded=not current_user.get("has_api_key"),
+    ):
+        key_provider = st.selectbox(
+            "Provider",
+            options=["gemini", "groq"],
+            format_func=lambda p: {
+                "gemini": "🌍 Google Gemini (free tier)",
+                "groq": "⚡ Groq (free tier)",
+            }[p],
+            key="key_provider",
+            index=0 if (current_user.get("api_provider") or "gemini") == "gemini" else 1,
+        )
+
+        key_default_model = (
+            "gemini-2.5-flash" if key_provider == "gemini" else "llama-3.3-70b-versatile"
+        )
+
+        key_model = st.text_input(
+            "Model",
+            value=current_user.get("api_model") or key_default_model,
+            key="key_model",
+        )
+
+        key_input = st.text_input(
+            "API Key",
+            type="password",
+            placeholder="Paste your free key here — encrypted on your account",
+            key="key_input",
+        )
+
+        col_save, col_remove = st.columns(2)
+
+        if col_save.button("💾 Save Key", use_container_width=True):
+            if not key_input.strip():
+                st.error("⚠️ Please paste an API key first.")
+            else:
+                update_api_key(
+                    current_user["id"],
+                    key_provider,
+                    key_model.strip() or key_default_model,
+                    key_input.strip(),
+                )
+                st.session_state["auth_user"] = get_user_by_id(current_user["id"])
+                st.success("✅ Key saved to your account.")
+                st.rerun()
+
+        if current_user.get("has_api_key"):
+            if col_remove.button("🗑️ Remove", use_container_width=True):
+                clear_api_key(current_user["id"])
+                st.session_state["auth_user"] = get_user_by_id(current_user["id"])
+                st.rerun()
+
+        if current_user.get("has_api_key"):
+            st.caption(
+                f"Current: {current_user['api_provider']} · "
+                f"{current_user.get('api_model') or 'default model'}"
+            )
+
+            if st.button("🔌 Test Connection", use_container_width=True):
+                with st.spinner("Testing connection..."):
+                    ok, message = test_connection(
+                        LLMConfig(
+                            provider=current_user["api_provider"],
+                            api_key=get_api_key(current_user["id"]),
+                            model=current_user.get("api_model") or "",
+                        )
+                    )
+                if ok:
+                    st.success(f"✅ {message}")
+                else:
+                    st.error(f"❌ {message}")
 
 
 # ==========================================================
