@@ -12,7 +12,11 @@ from src.document_loader import (
 )
 from src.requirement_analyzer import analyze_requirements
 from src.technique_selector import select_techniques
-from src.testcase_generator import generate_testcases
+from src.testcase_generator import (
+    generate_testcases,
+    generate_testcases_for_technique,
+    merge_technique_testcases,
+)
 from src.json_validator import validate_json
 from src.excel_generator import generate_excel
 from src.auth import (
@@ -31,6 +35,7 @@ from src.config import (
     JSON_RETRIES,
     GEMINI_MODEL,
     GROQ_MODEL,
+    MAX_TECHNIQUES_PER_RUN,
     OPENROUTER_MODEL,
 )
 
@@ -894,41 +899,96 @@ TEST CASE FORMAT
             st.write("⏳ Brief pause to stay within free-tier rate limits...")
             time.sleep(5)
 
-            # ---- Stage 3: Test Case Generation ----
-            st.write("🧪 **Stage 3** — Generating test cases...")
+            # ---- Stage 3: Test Case Generation (per technique) ----
+            st.write("🧪 **Stage 3** — Generating test cases per technique...")
+
+            selected_techniques = [
+                technique
+                for technique, enabled in (technique_json or {}).items()
+                if enabled is True or str(enabled).lower() in ("true", "yes", "1")
+            ][:MAX_TECHNIQUES_PER_RUN]
+
             usage_mark = len(llm_mod.usage_log())
-            try:
-                test_cases, testcases_raw = _stage_with_retry(
-                    lambda hint: generate_testcases(
-                        requirement_json,
-                        technique_json,
-                        test_case_format,
-                        llm_config,
-                        retry_hint=hint,
-                    ),
-                    status,
-                    "Test case generation",
-                )
-            except LLMError as exc:
-                status.update(label="❌ Test case generation failed", state="error")
-                st.error(f"❌ {exc}")
-                st.stop()
+
+            if selected_techniques:
+                # One focused call per technique -> technique combination.
+                per_technique_cases = []
+
+                for index, technique in enumerate(selected_techniques, start=1):
+                    st.write(
+                        f"🧪 **Stage 3** — {technique} "
+                        f"({index}/{len(selected_techniques)})..."
+                    )
+
+                    if index > 1:
+                        time.sleep(6)
+
+                    cases, _raw = _stage_with_retry(
+                        lambda hint, t=technique: generate_testcases_for_technique(
+                            requirement_json,
+                            t,
+                            test_case_format,
+                            llm_config,
+                            retry_hint=hint,
+                        ),
+                        status,
+                        f"Test case generation ({technique})",
+                    )
+
+                    if cases is None:
+                        st.warning(
+                            f"⚠️ Skipping {technique}: no valid JSON after "
+                            f"{JSON_RETRIES} attempts."
+                        )
+                        continue
+
+                    per_technique_cases.append((technique, cases))
+
+                test_cases = merge_technique_testcases(per_technique_cases)
+
+                if not test_cases:
+                    status.update(
+                        label="❌ Test case generation failed", state="error"
+                    )
+                    st.error("No test cases were generated for any technique.")
+                    st.stop()
+            else:
+                # No technique flags survived parsing — fall back to the
+                # single batch prompt so the run still completes.
+                st.write("No techniques flagged — using the standard prompt.")
+                try:
+                    test_cases, testcases_raw = _stage_with_retry(
+                        lambda hint: generate_testcases(
+                            requirement_json,
+                            technique_json,
+                            test_case_format,
+                            llm_config,
+                            retry_hint=hint,
+                        ),
+                        status,
+                        "Test case generation",
+                    )
+                except LLMError as exc:
+                    status.update(label="❌ Test case generation failed", state="error")
+                    st.error(f"❌ {exc}")
+                    st.stop()
+
+                if test_cases is None:
+                    status.update(label="❌ Test case generation failed", state="error")
+                    st.error(
+                        f"Test case generation returned invalid JSON after "
+                        f"{JSON_RETRIES} attempts. Please try again."
+                    )
+                    with st.expander("View raw model output"):
+                        st.code(testcases_raw)
+                    st.stop()
+
+                if isinstance(test_cases, dict):
+                    test_cases = [test_cases]
+
             usage_sections.append(
                 ("Stage 3 - Test Case Generation", llm_mod.usage_log()[usage_mark:])
             )
-
-            if test_cases is None:
-                status.update(label="❌ Test case generation failed", state="error")
-                st.error(
-                    f"Test case generation returned invalid JSON after "
-                    f"{JSON_RETRIES} attempts. Please try again."
-                )
-                with st.expander("View raw model output"):
-                    st.code(testcases_raw)
-                st.stop()
-
-            if isinstance(test_cases, dict):
-                test_cases = [test_cases]
 
             if not test_cases:
                 status.update(label="⚠️ No test cases generated", state="error")

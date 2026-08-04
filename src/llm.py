@@ -202,6 +202,7 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
         tried_models.append(model)
 
         use_json_mode = json_mode
+        transient_attempts = 0
 
         while True:
             body = {
@@ -254,6 +255,18 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
                         "API key rejected (401). Double-check the key in the sidebar."
                     ) from exc
 
+                if status >= 500:
+                    # Free-model hosts (e.g. OpenRouter :free) occasionally
+                    # overload; a short wait usually clears it.
+                    transient_attempts += 1
+                    if transient_attempts < 2:
+                        time.sleep(10)
+                        continue
+                    raise LLMError(
+                        f"{config.provider} is temporarily overloaded "
+                        f"(HTTP {status}). Wait a minute and retry."
+                    ) from exc
+
                 raise LLMError(f"Provider returned HTTP {status}.") from exc
             except httpx.ConnectError as exc:
                 raise LLMError(
@@ -266,8 +279,32 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
 
             try:
                 data = response.json()
+            except ValueError as exc:
+                raise LLMError(
+                    f"Unexpected response from {config.provider}. "
+                    f"Raw: {response.text[:300]}"
+                ) from exc
+
+            if isinstance(data, dict) and data.get("error"):
+                # Some gateways return HTTP 200 with an error body when an
+                # upstream host is overloaded.
+                error = data["error"]
+                message = (
+                    error.get("message", "")
+                    if isinstance(error, dict)
+                    else str(error)
+                )
+                transient_attempts += 1
+                if transient_attempts < 2 and message:
+                    time.sleep(10)
+                    continue
+                raise LLMError(
+                    f"{config.provider} reported: {(message or 'unknown error')[:300]}"
+                )
+
+            try:
                 content = data["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, ValueError) as exc:
+            except (KeyError, IndexError, TypeError) as exc:
                 raise LLMError(
                     f"Unexpected response shape from {config.provider}. "
                     f"Raw: {response.text[:300]}"

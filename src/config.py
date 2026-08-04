@@ -41,14 +41,17 @@ GROQ_FALLBACK_MODELS = [
 # Each :free model has its own daily bucket, so the fallback chain also
 # multiplies the daily quota. Roster rotates frequently — verified live
 # against openrouter.ai/api/v1/models (14 :free models currently).
-OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+#
+# Ordering matters: GPT-OSS complied exactly (4-row arrays); the Nemotron
+# reasoning models burn their output budget thinking and return 1 row.
+OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 OPENROUTER_FALLBACK_MODELS = [
+    "openai/gpt-oss-20b:free",
+    "google/gemma-4-31b-it:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "google/gemma-4-31b-it:free",
-    "openai/gpt-oss-20b:free",
     "google/gemma-4-26b-a4b-it:free",
 ]
 
@@ -76,3 +79,9 @@ SYSTEM_JSON_RULE = (
 
 # How many times a stage re-calls the model when its JSON fails to parse.
 JSON_RETRIES = 3
+
+# Stage 3 generates one focused call PER selected testing technique, then
+# merges the results — this is what produces the technique combination.
+# Cap the count to keep a run within free-tier per-minute request limits.
+MAX_TECHNIQUES_PER_RUN = 8
+MIN_CASES_PER_TECHNIQUE = 4

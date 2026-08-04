@@ -66,7 +66,7 @@ def test_openrouter_chat_uses_openrouter_base_url():
     args, kwargs = mocked_post.call_args
     assert args[0].startswith("https://openrouter.ai/api/v1")
     assert kwargs["headers"]["Authorization"] == "Bearer sk-or-123"
-    assert kwargs["json"]["model"] == "nvidia/nemotron-3-ultra-550b-a55b:free"
+    assert kwargs["json"]["model"] == "openai/gpt-oss-20b:free"
 
 
 def test_openrouter_400_retries_without_json_mode():
@@ -92,6 +92,36 @@ def test_openrouter_400_retries_without_json_mode():
     second_body = mocked_post.call_args_list[1].kwargs["json"]
     assert "response_format" in first_body
     assert "response_format" not in second_body
+
+
+def test_502_retries_then_raises_friendly_error():
+    # Transient upstream overload: first 502 -> wait + retry -> success.
+    responses = [
+        _fake_response({"error": {"message": "Upstream error"}}, status=502),
+        _fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ]
+
+    with mock.patch.object(
+        llm.httpx, "post", side_effect=responses
+    ) as mocked_post, mock.patch.object(llm.time, "sleep"):
+        result = llm.chat(LLMConfig(provider="openrouter", api_key="k"), "Hi")
+
+    assert result == "ok"
+    assert mocked_post.call_count == 2
+
+
+def test_error_body_with_http_200_surfaces_message():
+    responses = [
+        _fake_response({"error": {"message": "Worker local request limit reached"}}),
+        _fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ]
+
+    with mock.patch.object(
+        llm.httpx, "post", side_effect=responses
+    ), mock.patch.object(llm.time, "sleep"):
+        result = llm.chat(LLMConfig(provider="openrouter", api_key="k"), "Hi")
+
+    assert result == "ok"
 
 
 def test_openrouter_402_raises_credits_error():
@@ -326,7 +356,7 @@ def test_default_models_per_provider():
     assert LLMConfig(provider="groq").effective_model() == "llama-3.3-70b-versatile"
     assert (
         LLMConfig(provider="openrouter").effective_model()
-        == "nvidia/nemotron-3-ultra-550b-a55b:free"
+        == "openai/gpt-oss-20b:free"
     )
     assert LLMConfig().effective_model() == "qwen2.5:7b"
     assert LLMConfig(provider="gemini", model="custom").effective_model() == "custom"

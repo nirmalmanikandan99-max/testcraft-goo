@@ -35,3 +35,7 @@ debug_pipeline.py
 debug_usage.py
 debug_probe.py
 debug_headers.py
+debug_tech.py
+debug_raw.py
+debug_models.py
+debug_setmodel.py
