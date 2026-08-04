@@ -1,0 +1,31 @@
+# Environment / secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Generated output
+output/
+uploads/
+vector_store/
+
+# User database
+users.db
+
+# PyInstaller build artifacts
+build/
+dist/
+dist.zip
+*.spec
+
+# Local runtime data (machine-specific)
+logs/
+tools/
+current_url.txt
+
+# Local editor / tool settings
+.claude/
