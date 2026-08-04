@@ -17,8 +17,10 @@ import httpx
 
 from src.config import (
     GEMINI_BASE_URL,
+    GEMINI_FALLBACK_MODELS,
     GEMINI_MODEL,
     GROQ_BASE_URL,
+    GROQ_FALLBACK_MODELS,
     GROQ_MODEL,
     MODEL_NAME,
 )
@@ -59,8 +61,23 @@ def _openai_compatible_base(provider):
     raise LLMError(f"Unknown online provider: {provider}")
 
 
+def _model_candidates(config):
+    """Configured model first, then known fallbacks for that provider."""
+
+    fallbacks = (
+        GEMINI_FALLBACK_MODELS if config.provider == "gemini" else GROQ_FALLBACK_MODELS
+    )
+
+    # dict.fromkeys keeps order while de-duplicating.
+    return list(dict.fromkeys([config.effective_model()] + fallbacks))
+
+
 def _call_http_provider(config, prompt, temperature, num_predict):
-    """POST to an OpenAI-compatible endpoint (Gemini / Groq)."""
+    """POST to an OpenAI-compatible endpoint (Gemini / Groq).
+
+    On a 404 (model not found/renamed), retries known fallback model IDs
+    for the provider so stale model names keep working automatically.
+    """
 
     if not config.api_key.strip():
         raise LLMError(
@@ -75,57 +92,97 @@ def _call_http_provider(config, prompt, temperature, num_predict):
         "Content-Type": "application/json",
     }
 
-    body = {
-        "model": config.effective_model(),
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": num_predict,
-    }
+    tried_models = []
+
+    for model in _model_candidates(config):
+        tried_models.append(model)
+
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": num_predict,
+        }
+
+        try:
+            response = httpx.post(
+                url,
+                headers=headers,
+                json=body,
+                timeout=DEFAULT_TIMEOUT,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+
+            if status == 404:
+                continue  # try the next known model ID
+
+            if status == 401:
+                raise LLMError(
+                    "API key rejected (401). Double-check the key in the sidebar."
+                ) from exc
+            if status == 429:
+                raise LLMError(
+                    "Rate limit reached (429) on the free tier. "
+                    "Wait a minute and retry, or switch provider."
+                ) from exc
+
+            raise LLMError(f"Provider returned HTTP {status}.") from exc
+        except httpx.ConnectError as exc:
+            raise LLMError(
+                "Could not reach the provider. Check your internet connection."
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError(
+                "The provider timed out. The request may have been large — retry."
+            ) from exc
+
+        try:
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, ValueError) as exc:
+            raise LLMError(
+                f"Unexpected response shape from {config.provider}. "
+                f"Raw: {response.text[:300]}"
+            ) from exc
+
+    raise LLMError(
+        f"Model not found (404): none of the tried models exist on {config.provider}. "
+        f"Tried: {', '.join(tried_models)}. "
+        "Check the model name in the AI Engine section of the sidebar."
+    )
+
+
+def list_models(config):
+    """
+    Fetch the provider's available model IDs (OpenAI-compatible GET /models).
+
+    Returns a sorted list of IDs, or [] if unavailable / no key / offline.
+    Used by the UI to show what actually works with a given key.
+    """
+
+    if config.provider == "ollama":
+        return []
+
+    if not config.api_key.strip():
+        return []
+
+    url = f"{_openai_compatible_base(config.provider)}/models"
+    headers = {"Authorization": f"Bearer {config.api_key.strip()}"}
 
     try:
-        response = httpx.post(
-            url,
-            headers=headers,
-            json=body,
-            timeout=DEFAULT_TIMEOUT,
-        )
+        response = httpx.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-
-        if status == 401:
-            raise LLMError(
-                "API key rejected (401). Double-check the key in the sidebar."
-            ) from exc
-        if status == 404:
-            raise LLMError(
-                f"Model not found (404): {config.effective_model()!r}. "
-                "Pick a model that exists on this provider."
-            ) from exc
-        if status == 429:
-            raise LLMError(
-                "Rate limit reached (429) on the free tier. "
-                "Wait a minute and retry, or switch provider."
-            ) from exc
-
-        raise LLMError(f"Provider returned HTTP {status}.") from exc
-    except httpx.ConnectError as exc:
-        raise LLMError(
-            "Could not reach the provider. Check your internet connection."
-        ) from exc
-    except httpx.TimeoutException as exc:
-        raise LLMError(
-            "The provider timed out. The request may have been large — retry."
-        ) from exc
+    except Exception:
+        return []
 
     try:
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, ValueError) as exc:
-        raise LLMError(
-            f"Unexpected response shape from {config.provider}. "
-            f"Raw: {response.text[:300]}"
-        ) from exc
+        models = response.json().get("data", [])
+        ids = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
+        return sorted(set(ids))
+    except Exception:
+        return []
 
 
 def _call_ollama(config, prompt, temperature, num_predict):

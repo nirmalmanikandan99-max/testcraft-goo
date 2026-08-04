@@ -23,7 +23,7 @@ from src.auth import (
     update_api_key,
     clear_api_key,
 )
-from src.llm import LLMConfig, LLMError, test_connection
+from src.llm import LLMConfig, LLMError, test_connection, list_models
 
 # ------------------------------------------------------------------
 # Cloud secrets -> environment (Neon DB + encryption master key).
@@ -305,7 +305,7 @@ def render_auth_page():
                     )
                     api_model = st.text_input(
                         "Model",
-                        value="gemini-2.5-flash"
+                        value="gemini-3-flash"
                         if api_provider == "gemini"
                         else "llama-3.3-70b-versatile",
                         key="signup_api_model",
@@ -508,7 +508,7 @@ with st.sidebar:
         )
 
         key_default_model = (
-            "gemini-2.5-flash" if key_provider == "gemini" else "llama-3.3-70b-versatile"
+            "gemini-3-flash" if key_provider == "gemini" else "llama-3.3-70b-versatile"
         )
 
         key_model = st.text_input(
@@ -563,6 +563,20 @@ with st.sidebar:
                     )
                 if ok:
                     st.success(f"✅ {message}")
+
+                    available = list_models(
+                        LLMConfig(
+                            provider=current_user["api_provider"],
+                            api_key=get_api_key(current_user["id"]),
+                        )
+                    )
+
+                    if available:
+                        st.caption(
+                            "Available models: "
+                            + ", ".join(available[:8])
+                            + (" …" if len(available) > 8 else "")
+                        )
                 else:
                     st.error(f"❌ {message}")
 

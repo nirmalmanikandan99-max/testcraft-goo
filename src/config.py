@@ -12,12 +12,29 @@ MODEL_NAME = "qwen2.5:7b"
 # ------------------------------------------------------------------
 
 # Google AI Studio — OpenAI-compatible endpoint.
-GEMINI_MODEL = "gemini-2.5-flash"
+# gemini-2.5-flash was the old free default; 2026 projects ship 3.x models.
+GEMINI_MODEL = "gemini-3-flash"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+# On a 404, the provider layer retries these in order (first hit wins).
+GEMINI_FALLBACK_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.1-flash-lite",
+]
 
 # Groq — OpenAI-compatible endpoint.
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+GROQ_FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-4-scout",
+    "qwen3-32b",
+]
 
 # Analysis and technique-selection are deterministic tasks -> low temperature.
 ANALYSIS_TEMPERATURE = 0.1

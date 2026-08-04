@@ -128,3 +128,53 @@ def test_unknown_online_provider_raises():
         assert "mars" in str(exc)
     else:
         raise AssertionError("Expected LLMError")
+
+
+def test_404_falls_back_to_next_model():
+    # Configured model 404s -> provider retries the fallback list, succeeds.
+    responses = [
+        _fake_response({"error": "not found"}, status=404),
+        _fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ]
+
+    with mock.patch.object(llm.httpx, "post", side_effect=responses) as mocked_post:
+        config = LLMConfig(provider="gemini", api_key="k", model="stale-model")
+        result = llm.chat(config, "Hi")
+
+    assert result == "ok"
+    body = mocked_post.call_args_list[-1].kwargs["json"]
+    assert body["model"] != "stale-model"  # used a fallback model
+
+
+def test_all_models_404_raises_friendly_error():
+    with mock.patch.object(
+        llm.httpx,
+        "post",
+        return_value=_fake_response({"error": "nope"}, status=404),
+    ):
+        try:
+            llm.chat(LLMConfig(provider="gemini", api_key="k", model="stale-model"), "Hi")
+        except LLMError as exc:
+            assert "Model not found (404)" in str(exc)
+            assert "stale-model" in str(exc)
+        else:
+            raise AssertionError("Expected LLMError")
+
+
+def test_list_models_returns_ids():
+    with mock.patch.object(
+        llm.httpx,
+        "get",
+        return_value=_fake_response(
+            {"data": [{"id": "gemini-3-flash"}, {"id": "gemini-2.5-flash"}]}
+        ),
+    ) as mocked_get:
+        ids = llm.list_models(LLMConfig(provider="gemini", api_key="k"))
+
+    assert ids == ["gemini-2.5-flash", "gemini-3-flash"]
+    assert "Bearer k" in mocked_get.call_args.kwargs["headers"]["Authorization"]
+
+
+def test_list_models_empty_without_key():
+    assert llm.list_models(LLMConfig(provider="gemini")) == []
+    assert llm.list_models(LLMConfig()) == []
