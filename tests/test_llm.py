@@ -79,6 +79,8 @@ def test_unauthorized_raises_friendly_error():
 
 
 def test_rate_limit_raises_friendly_error():
+    # Every candidate model 429s: first gets full backoff (2 sleeps), the
+    # later candidates get one shot each (1 sleep per model gap).
     with mock.patch.object(
         llm.httpx,
         "post",
@@ -88,13 +90,35 @@ def test_rate_limit_raises_friendly_error():
             llm.chat(LLMConfig(provider="groq", api_key="k"), "Hi")
         except LLMError as exc:
             assert "429" in str(exc)
-            assert mocked_sleep.call_count == 2  # backed off twice
+            assert mocked_sleep.call_count == 4  # 2 backoff + 2 model gaps
         else:
             raise AssertionError("Expected LLMError")
 
 
+def test_429_switches_to_next_model_when_that_one_works():
+    # Model 0 always 429s; model 1 (same request path, next candidate)
+    # succeeds — the request must be retried on the next candidate.
+    responses = [
+        _fake_response({"error": "slow down"}, status=429),
+        _fake_response({"error": "slow down"}, status=429),
+        _fake_response({"error": "slow down"}, status=429),
+        _fake_response({"choices": [{"message": {"content": "ok"}}]}),
+    ]
+
+    with mock.patch.object(
+        llm.httpx, "post", side_effect=responses
+    ) as mocked_post, mock.patch.object(llm.time, "sleep"):
+        result = llm.chat(LLMConfig(provider="gemini", api_key="k"), "Hi")
+
+    assert result == "ok"
+    # 3 attempts on model 0, then the next candidate.
+    assert mocked_post.call_count == 4
+    assert mocked_post.call_args_list[3].kwargs["json"]["model"] != mocked_post.call_args_list[0].kwargs["json"]["model"]
+
+
 def test_429_retries_until_success():
-    # Two 429s, then a good response: backoff must wait and succeed.
+    # Two 429s, then a good response on the same model: backoff must
+    # wait and succeed without switching models.
     responses = [
         _fake_response({"error": "slow down"}, status=429),
         _fake_response({"error": "slow down"}, status=429),

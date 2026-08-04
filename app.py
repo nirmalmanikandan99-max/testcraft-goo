@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -742,6 +743,12 @@ TEST CASE FORMAT
                     st.code(requirement_raw)
                 st.stop()
 
+            # Free-tier quotas (Gemini/Groq) are ~10-15 requests/minute;
+            # spacing stage calls keeps a run under the ceiling even with
+            # retries.
+            st.write("⏳ Brief pause to stay within free-tier rate limits...")
+            time.sleep(5)
+
             # ---- Stage 2: Technique Selection ----
             st.write("🎯 **Stage 2** — Selecting testing techniques...")
             try:
@@ -766,6 +773,9 @@ TEST CASE FORMAT
                 with st.expander("View raw model output"):
                     st.code(technique_raw)
                 st.stop()
+
+            st.write("⏳ Brief pause to stay within free-tier rate limits...")
+            time.sleep(5)
 
             # ---- Stage 3: Test Case Generation ----
             st.write("🧪 **Stage 3** — Generating test cases...")

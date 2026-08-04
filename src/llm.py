@@ -83,16 +83,15 @@ def _build_messages(prompt, system=None):
     return [{"role": "user", "content": prompt}]
 
 
-def _post_with_429_backoff(url, headers, body):
+def _post_with_429_backoff(url, headers, body, max_attempts=3):
     """POST, retrying on 429 (free-tier rate limit) with backoff.
 
     Free tiers (Gemini/Groq) throttle bursts; a short wait usually clears
-    the limit. Honors the Retry-After header when the provider sends one,
-    otherwise waits 5s / 20s / 45s across up to 3 attempts.
+    the per-minute window. Honors the Retry-After header when the provider
+    sends one, otherwise waits 5s / 20s / 45s across the attempts.
     """
 
     fallback_waits = (5.0, 20.0, 45.0)
-    max_attempts = len(fallback_waits)
 
     for attempt in range(1, max_attempts + 1):
         response = httpx.post(url, headers=headers, json=body, timeout=DEFAULT_TIMEOUT)
@@ -119,11 +118,12 @@ def _post_with_429_backoff(url, headers, body):
 def _call_http_provider(config, prompt, temperature, num_predict, system=None, json_mode=False):
     """POST to an OpenAI-compatible endpoint (Gemini / Groq).
 
-    On a 404 (model not found/renamed), retries known fallback model IDs
-    for the provider so stale model names keep working automatically.
-
-    With ``json_mode=True`` the provider is asked to force JSON output
-    (response_format json_object), which Gemini and Groq both support.
+    - 404 (model renamed/removed): retries known fallback model IDs for the
+      provider so stale model names keep working automatically.
+    - 429 (free-tier rate limit): free-tier quotas are PER MODEL, so after
+      backoff on one model the request moves to the next candidate, which
+      has its own request budget. Only the first 429ed model gets the full
+      backoff so worst-case wall time stays ~90s.
     """
 
     if not config.api_key.strip():
@@ -140,8 +140,10 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
     }
 
     tried_models = []
+    candidates = _model_candidates(config)
+    saw_429 = False
 
-    for model in _model_candidates(config):
+    for model in candidates:
         tried_models.append(model)
 
         body = {
@@ -157,7 +159,11 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
             body["response_format"] = {"type": "json_object"}
 
         try:
-            response = _post_with_429_backoff(url, headers, body)
+            # Full backoff only on the first model that rate-limits; later
+            # candidates (separate quota buckets) get one attempt each.
+            response = _post_with_429_backoff(
+                url, headers, body, max_attempts=3 if not saw_429 else 1
+            )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
@@ -165,15 +171,23 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
             if status == 404:
                 continue  # try the next known model ID
 
+            if status == 429:
+                saw_429 = True
+                if model is not candidates[-1]:
+                    # Each candidate has its own free-tier request budget.
+                    time.sleep(3)
+                    continue
+                raise LLMError(
+                    "Rate limit reached (429) on the free tier, even after "
+                    "automatic backoff retries across every candidate model. "
+                    "Per-minute limits reset within ~60s — wait a minute and "
+                    "retry. If 429s continue all day, the daily request limit "
+                    "(resets midnight Pacific) has been hit."
+                ) from exc
+
             if status == 401:
                 raise LLMError(
                     "API key rejected (401). Double-check the key in the sidebar."
-                ) from exc
-            if status == 429:
-                raise LLMError(
-                    "Rate limit reached (429) on the free tier even after "
-                    "automatic backoff retries. Wait a minute and try again, "
-                    "or switch provider."
                 ) from exc
 
             raise LLMError(f"Provider returned HTTP {status}.") from exc
