@@ -81,11 +81,14 @@ def _build_messages(prompt, system=None):
     return [{"role": "user", "content": prompt}]
 
 
-def _call_http_provider(config, prompt, temperature, num_predict, system=None):
+def _call_http_provider(config, prompt, temperature, num_predict, system=None, json_mode=False):
     """POST to an OpenAI-compatible endpoint (Gemini / Groq).
 
     On a 404 (model not found/renamed), retries known fallback model IDs
     for the provider so stale model names keep working automatically.
+
+    With ``json_mode=True`` the provider is asked to force JSON output
+    (response_format json_object), which Gemini and Groq both support.
     """
 
     if not config.api_key.strip():
@@ -112,6 +115,11 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None):
             "temperature": temperature,
             "max_tokens": num_predict,
         }
+
+        if json_mode:
+            # Both providers require the word "json" somewhere in the prompt
+            # when this mode is on; all pipeline prompts already mention it.
+            body["response_format"] = {"type": "json_object"}
 
         try:
             response = httpx.post(
@@ -194,7 +202,7 @@ def list_models(config):
         return []
 
 
-def _call_ollama(config, prompt, temperature, num_predict, system=None):
+def _call_ollama(config, prompt, temperature, num_predict, system=None, json_mode=False):
     """Local Ollama fallback (no internet required)."""
 
     try:
@@ -206,11 +214,15 @@ def _call_ollama(config, prompt, temperature, num_predict, system=None):
             "Use an online provider instead."
         ) from exc
 
+    options = {"temperature": temperature, "num_predict": num_predict}
+    if json_mode:
+        options["format"] = "json"  # Ollama's structured output mode
+
     try:
         response = chat(
             model=config.effective_model(),
             messages=_build_messages(prompt, system),
-            options={"temperature": temperature, "num_predict": num_predict},
+            options=options,
         )
     except OllamaResponseError as exc:
         status = getattr(exc, "status_code", None)
@@ -232,7 +244,7 @@ def _call_ollama(config, prompt, temperature, num_predict, system=None):
     return response["message"]["content"]
 
 
-def chat(config, prompt, temperature=0.1, num_predict=4096, system=None):
+def chat(config, prompt, temperature=0.1, num_predict=4096, system=None, json_mode=False):
     """
     Send a single-turn prompt to the configured provider.
 
@@ -240,14 +252,21 @@ def chat(config, prompt, temperature=0.1, num_predict=4096, system=None):
     more reliable at enforcing output rules (e.g. strict JSON) than a note
     buried in the user prompt.
 
+    ``json_mode=True`` asks the provider for guaranteed-JSON output
+    (response_format on Gemini/Groq, format=json on Ollama).
+
     Returns the raw text response. Raises LLMError with a user-friendly
     message on any failure so the UI can show it directly.
     """
 
     if config.provider == "ollama":
-        return _call_ollama(config, prompt, temperature, num_predict, system)
+        return _call_ollama(
+            config, prompt, temperature, num_predict, system, json_mode
+        )
 
-    return _call_http_provider(config, prompt, temperature, num_predict, system)
+    return _call_http_provider(
+        config, prompt, temperature, num_predict, system, json_mode
+    )
 
 
 def test_connection(config):

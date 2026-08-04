@@ -38,6 +38,7 @@ PROJECT CONTEXT
         temperature=ANALYSIS_TEMPERATURE,
         num_predict=ANALYSIS_NUM_PREDICT,
         system=SYSTEM_JSON_RULE,
+        json_mode=True,
     )
 
     print("Step 4 - Response Received")

@@ -204,3 +204,27 @@ def test_chat_without_system_has_only_user_message():
     messages = mocked_post.call_args.kwargs["json"]["messages"]
     assert len(messages) == 1
     assert messages[0]["role"] == "user"
+
+
+def test_json_mode_sets_response_format():
+    with mock.patch.object(
+        llm.httpx, "post", return_value=_fake_response({"choices": [{"message": {"content": "{}"}}]})
+    ) as mocked_post:
+        llm.chat(
+            LLMConfig(provider="gemini", api_key="k"),
+            "Return JSON",
+            json_mode=True,
+        )
+
+    body = mocked_post.call_args.kwargs["json"]
+    assert body["response_format"] == {"type": "json_object"}
+
+
+def test_no_json_mode_omits_response_format():
+    with mock.patch.object(
+        llm.httpx, "post", return_value=_fake_response({"choices": [{"message": {"content": "ok"}}]})
+    ) as mocked_post:
+        llm.chat(LLMConfig(provider="gemini", api_key="k"), "Hi")
+
+    body = mocked_post.call_args.kwargs["json"]
+    assert "response_format" not in body

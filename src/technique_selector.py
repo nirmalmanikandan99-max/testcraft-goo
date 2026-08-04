@@ -28,6 +28,7 @@ REQUIREMENT ANALYSIS
         temperature=ANALYSIS_TEMPERATURE,
         num_predict=ANALYSIS_NUM_PREDICT,
         system=SYSTEM_JSON_RULE,
+        json_mode=True,
     )
 
     return response

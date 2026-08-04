@@ -44,7 +44,7 @@ GENERATION_TEMPERATURE = 0.2
 
 # Token budget per stage. Generation needs generous headroom so large
 # JSON arrays are not truncated mid-array.
-ANALYSIS_NUM_PREDICT = 300
+ANALYSIS_NUM_PREDICT = 1024
 GENERATION_NUM_PREDICT = 4096
 
 # System instruction prepended to every pipeline call: these tasks must

@@ -64,6 +64,7 @@ Selected Testing Techniques
         # mid-array and breaks parsing. Give generous headroom.
         num_predict=GENERATION_NUM_PREDICT,
         system=SYSTEM_JSON_RULE,
+        json_mode=True,
     )
 
     return response
