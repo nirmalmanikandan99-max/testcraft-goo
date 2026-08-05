@@ -160,8 +160,6 @@ def test_batch_builds_one_combined_skeleton_and_prompt():
     assert "2 techniques x 4 cases" in prompt
     assert "Positive Testing" in prompt
     assert "Negative Testing" in prompt
-
-
 def test_batch_topup_covers_short_replies():
     import json as _json
 
@@ -201,3 +199,43 @@ def test_group_rows_by_technique_buckets_and_falls_back():
     assert [c["Title of Test Case"] for c in by_name["Negative Testing"]] == ["N1"]
     assert by_name["Positive Testing"][1]["Testing Technique"] == "Positive Testing"
     assert [name for name, _ in grouped] == ["Positive Testing", "Negative Testing"]
+
+
+def test_batch_injects_navigation_steps_into_prompt():
+    with _mock_chat_reply("[]") as mocked_chat:
+        generate_testcases_for_techniques(
+            REQUIREMENT,
+            ["Negative Testing"],
+            navigation_steps="Open the application\nLogin with valid credentials",
+        )
+
+    prompt = mocked_chat.call_args.args[1]
+    assert "NAVIGATION STEPS" in prompt
+    assert "Open the application" in prompt
+    assert "Login with valid credentials" in prompt
+    assert "Validate <Title of Test Case>" in prompt
+    assert '"Actions to be done"' in prompt or '"When"' in prompt
+
+
+def test_navigation_omitted_when_empty():
+    with _mock_chat_reply("[]") as mocked_chat:
+        generate_testcases_for_techniques(
+            REQUIREMENT, ["Negative Testing"], navigation_steps="  "
+        )
+
+    prompt = mocked_chat.call_args.args[1]
+    assert "NAVIGATION STEPS" not in prompt
+
+
+def test_generate_testcases_injects_navigation_steps():
+    with _mock_chat_reply("[]") as mocked_chat:
+        generate_testcases(
+            REQUIREMENT,
+            TECHNIQUES,
+            navigation_steps="Open the application\nLogin",
+        )
+
+    prompt = mocked_chat.call_args.args[1]
+    assert "NAVIGATION STEPS" in prompt
+    assert "Open the application" in prompt
+    assert "Validate <Title of Test Case>" in prompt

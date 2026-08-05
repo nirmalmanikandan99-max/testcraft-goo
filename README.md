@@ -104,7 +104,7 @@ The app supports **one local** and **three online** AI engines. Choose any engin
 1. **Upload a Functional Document** (PDF/DOCX/TXT) — sidebar, left side
 2. *(Optional)* Add **Supporting Documents** — extra context
 3. Choose **Test Case Format**: `Conventional Test Case` or `GWT`
-4. Fill in **User Story Title** and **Acceptance Criteria** (main area)
+4. Fill in **User Story Title**, **Acceptance Criteria**, and (optional) **Navigation** steps — one per line. Navigation becomes the *Actions to be done* (Conventional) / *When* (GWT) for every test case, ending with a final `Validate <Test Case Title>` step
 5. Click **🚀 Generate Test Cases**
 6. Watch the 4-stage pipeline run:
    - **Stage 1** — requirement analysis (structured JSON)

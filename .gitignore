@@ -43,3 +43,4 @@ debug_models.py
 debug_setmodel.py
 debug_batch.py
 debug_bench.py
+debug_nav.py

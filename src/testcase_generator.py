@@ -37,12 +37,45 @@ def _load_prompt(test_case_format):
         return file.read()
 
 
+def _navigation_section(navigation_steps):
+    """Prompt block that turns the user's navigation box into test steps.
+
+    The steps become the 'Actions to be done' (Conventional) or 'When' (GWT)
+    for every test case, always ending with the 'Validate: <title>' step.
+    Returns "" when no navigation steps were provided.
+    """
+    if not navigation_steps or not str(navigation_steps).strip():
+        return ""
+
+    return f"""
+====================================
+
+NAVIGATION STEPS
+
+{str(navigation_steps).strip()}
+
+====================================
+
+TEST STEPS RULE
+
+1. The tester reaches the feature under test using the NAVIGATION STEPS
+   above — write them into EVERY test case
+   (into "Actions to be done" for the Conventional format, or "When" for GWT).
+2. Adapt a step only when the scenario needs different input at that point
+   (e.g. entering invalid data at the relevant step); never skip the steps.
+3. ALWAYS end the steps with exactly one final step:
+   Validate <Title of Test Case>
+   (replace <Title of Test Case> with that row's actual title).
+"""
+
+
 def generate_testcases(
     requirement_json,
     technique_json,
     test_case_format="Conventional Test Case",
     llm_config=None,
     retry_hint=None,
+    navigation_steps="",
 ):
 
     prompt = _load_prompt(test_case_format)
@@ -63,6 +96,7 @@ Selected Testing Techniques
 {technique_json}
 
 ====================================
+{_navigation_section(navigation_steps)}
 """
 
     if retry_hint:
@@ -117,6 +151,7 @@ def generate_testcases_for_technique(
     test_case_format="Conventional Test Case",
     llm_config=None,
     retry_hint=None,
+    navigation_steps="",
 ):
     """
     One focused generation call for a SINGLE testing technique.
@@ -137,7 +172,7 @@ def generate_testcases_for_technique(
 Requirement Analysis
 
 {requirement_json}
-
+{_navigation_section(navigation_steps)}
 ====================================
 
 FOCUSED TECHNIQUE
@@ -239,6 +274,7 @@ def generate_testcases_for_techniques(
     test_case_format="Conventional Test Case",
     llm_config=None,
     retry_hint=None,
+    navigation_steps="",
 ):
     """
     Generate cases for SEVERAL techniques in one call (a batch).
@@ -281,7 +317,7 @@ def generate_testcases_for_techniques(
 Requirement Analysis
 
 {requirement_json}
-
+{_navigation_section(navigation_steps)}
 ====================================
 
 FOCUSED TECHNIQUES

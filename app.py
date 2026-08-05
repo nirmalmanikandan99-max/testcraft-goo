@@ -640,13 +640,36 @@ if supporting_document_text:
 section_title("✍️", "User Story Details")
 
 with st.container(border=True):
-    story_title = st.text_input("User Story Title", placeholder="e.g. As a user, I want to log in securely")
+    title_col, nav_col = st.columns([2, 1], vertical_alignment="top")
 
-    acceptance = st.text_area(
-        "Acceptance Criteria",
-        height=200,
-        placeholder="List the acceptance criteria, one per line..."
-    )
+    with title_col:
+        story_title = st.text_input(
+            "User Story Title",
+            placeholder="e.g. As a user, I want to log in securely",
+        )
+
+        acceptance = st.text_area(
+            "Acceptance Criteria",
+            height=200,
+            placeholder="List the acceptance criteria, one per line...",
+        )
+
+    with nav_col:
+        navigation = st.text_area(
+            "Navigation",
+            height=260,
+            placeholder=(
+                "One step per line, e.g.\n"
+                "Open the application\n"
+                "Login with valid credentials\n"
+                "Navigate to Leave Management"
+            ),
+            help=(
+                "These steps become the 'Actions to be done' (Conventional) "
+                "or 'When' (GWT) for every test case, always ending with the "
+                "final step 'Validate <Title of Test Case>'."
+            ),
+        )
 
 st.markdown("")
 
@@ -795,6 +818,17 @@ if generate_clicked:
 
     else:
 
+        navigation_block = ""
+        if navigation and navigation.strip():
+            navigation_block = f"""
+===========================
+NAVIGATION STEPS
+===========================
+
+{navigation.strip()}
+
+"""
+
         complete_context = f"""
 ===========================
 FUNCTIONAL DOCUMENT
@@ -824,6 +858,9 @@ TEST CASE FORMAT
 
 {test_case_format}
 """
+
+        if navigation_block:
+            complete_context += navigation_block
 
         # Clear any previous run
         st.session_state.pop("results", None)
@@ -939,6 +976,7 @@ TEST CASE FORMAT
                                 test_case_format,
                                 llm_config,
                                 retry_hint=hint,
+                                navigation_steps=navigation,
                             ),
                             status,
                             f"Test case generation (batch {batch_index}/{len(batches)})",
@@ -980,6 +1018,7 @@ TEST CASE FORMAT
                             test_case_format,
                             llm_config,
                             retry_hint=hint,
+                            navigation_steps=navigation,
                         ),
                         status,
                         "Test case generation",
