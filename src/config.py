@@ -44,6 +44,7 @@ GROQ_FALLBACK_MODELS = [
 #
 # Ordering matters: GPT-OSS complied exactly (4-row arrays); the Nemotron
 # reasoning models burn their output budget thinking and return 1 row.
+# The same list is used for the UI's default model dropdown.
 OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
