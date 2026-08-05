@@ -14,7 +14,8 @@ from src.requirement_analyzer import analyze_requirements
 from src.technique_selector import select_techniques
 from src.testcase_generator import (
     generate_testcases,
-    generate_testcases_for_technique,
+    generate_testcases_for_techniques,
+    group_rows_by_technique,
     merge_technique_testcases,
 )
 from src.json_validator import validate_json
@@ -37,6 +38,7 @@ from src.config import (
     GROQ_MODEL,
     MAX_TECHNIQUES_PER_RUN,
     OPENROUTER_MODEL,
+    TECHNIQUES_PER_BATCH,
 )
 
 PROVIDER_OPTIONS = ["gemini", "groq", "openrouter"]
@@ -911,38 +913,46 @@ TEST CASE FORMAT
             usage_mark = len(llm_mod.usage_log())
 
             if selected_techniques:
-                # One focused call per technique -> technique combination.
+                # Batch several techniques per generation call — many small
+                # calls on free-tier providers run past 3 minutes and time out.
+                batches = [
+                    selected_techniques[i : i + TECHNIQUES_PER_BATCH]
+                    for i in range(0, len(selected_techniques), TECHNIQUES_PER_BATCH)
+                ]
+
                 per_technique_cases = []
 
-                for index, technique in enumerate(selected_techniques, start=1):
+                for batch_index, batch in enumerate(batches, start=1):
                     st.write(
-                        f"🧪 **Stage 3** — {technique} "
-                        f"({index}/{len(selected_techniques)})..."
+                        f"🧪 **Stage 3** — batch {batch_index}/{len(batches)}: "
+                        f"{', '.join(batch)}..."
                     )
 
-                    if index > 1:
+                    if batch_index > 1:
                         time.sleep(6)
 
                     cases, _raw = _stage_with_retry(
-                        lambda hint, t=technique: generate_testcases_for_technique(
+                        lambda hint, b=batch: generate_testcases_for_techniques(
                             requirement_json,
-                            t,
+                            b,
                             test_case_format,
                             llm_config,
                             retry_hint=hint,
                         ),
                         status,
-                        f"Test case generation ({technique})",
+                        f"Test case generation (batch {batch_index}/{len(batches)})",
                     )
 
                     if cases is None:
                         st.warning(
-                            f"⚠️ Skipping {technique}: no valid JSON after "
+                            f"⚠️ Skipping batch {batch_index}: no valid JSON after "
                             f"{JSON_RETRIES} attempts."
                         )
                         continue
 
-                    per_technique_cases.append((technique, cases))
+                    per_technique_cases.extend(
+                        group_rows_by_technique(cases, batch)
+                    )
 
                 test_cases = merge_technique_testcases(per_technique_cases)
 

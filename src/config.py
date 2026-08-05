@@ -42,18 +42,21 @@ GROQ_FALLBACK_MODELS = [
 # multiplies the daily quota. Roster rotates frequently — verified live
 # against openrouter.ai/api/v1/models (14 :free models currently).
 #
-# Ordering matters: GPT-OSS complied exactly (4-row arrays); the Nemotron
-# reasoning models burn their output budget thinking and return 1 row.
+# Ordering matters (benchmarked live with a 3-technique batch):
+#  - gemma-4-26b-a4b-it : 8 rows in 52s, fully compliant  -> default
+#  - gpt-oss-20b        : 8 rows in 152s, compliant (but slow)
+#  - gemma-4-31b-it     : 8 rows in 174s, compliant (and frequently limiter)
+#  - Nemotron reasoning : 2 rows in 68s -> demoted (1-row collapse risk)
 # The same list is used for the UI's default model dropdown.
-OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 OPENROUTER_FALLBACK_MODELS = [
+    "google/gemma-4-26b-a4b-it:free",
     "openai/gpt-oss-20b:free",
     "google/gemma-4-31b-it:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "google/gemma-4-26b-a4b-it:free",
 ]
 
 # Analysis and technique-selection are deterministic tasks -> low temperature.
@@ -81,8 +84,11 @@ SYSTEM_JSON_RULE = (
 # How many times a stage re-calls the model when its JSON fails to parse.
 JSON_RETRIES = 3
 
-# Stage 3 generates one focused call PER selected testing technique, then
-# merges the results — this is what produces the technique combination.
-# Cap the count to keep a run within free-tier per-minute request limits.
+# Stage 3 generates cases for all selected techniques, then merges the
+# results — this is what produces the technique combination. The techniques
+# are grouped into small batches so each LLM call covers 2 techniques at once
+# (many small calls on free-tier providers run past 3 minutes and time out;
+# per-call overhead dominates latency, so small batches are fastest).
 MAX_TECHNIQUES_PER_RUN = 8
 MIN_CASES_PER_TECHNIQUE = 4
+TECHNIQUES_PER_BATCH = 2

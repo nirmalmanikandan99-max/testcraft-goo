@@ -66,7 +66,7 @@ def test_openrouter_chat_uses_openrouter_base_url():
     args, kwargs = mocked_post.call_args
     assert args[0].startswith("https://openrouter.ai/api/v1")
     assert kwargs["headers"]["Authorization"] == "Bearer sk-or-123"
-    assert kwargs["json"]["model"] == "openai/gpt-oss-20b:free"
+    assert kwargs["json"]["model"] == "google/gemma-4-26b-a4b-it:free"
 
 
 def test_openrouter_400_retries_without_json_mode():
@@ -356,7 +356,7 @@ def test_default_models_per_provider():
     assert LLMConfig(provider="groq").effective_model() == "llama-3.3-70b-versatile"
     assert (
         LLMConfig(provider="openrouter").effective_model()
-        == "openai/gpt-oss-20b:free"
+        == "google/gemma-4-26b-a4b-it:free"
     )
     assert LLMConfig().effective_model() == "qwen2.5:7b"
     assert LLMConfig(provider="gemini", model="custom").effective_model() == "custom"

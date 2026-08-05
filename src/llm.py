@@ -30,7 +30,9 @@ from src.config import (
     OPENROUTER_MODEL,
 )
 
-DEFAULT_TIMEOUT = 180.0
+# Batched per-technique generation produces large arrays; free-tier upstream
+# providers stream slowly, so allow a generous read window before giving up.
+DEFAULT_TIMEOUT = 240.0
 
 # Usage events collected from every successful provider call in the current
 # pipeline run (model used, token counts, rate-limit headers). Cleared by
