@@ -51,6 +51,8 @@ GROQ_FALLBACK_MODELS = [
 OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Same list drives the UI default-model dropdown; keep ORDER as the live
+# benchmark ranking (fastest compliant model first).
 OPENROUTER_FALLBACK_MODELS = [
     "google/gemma-4-26b-a4b-it:free",
     "openai/gpt-oss-20b:free",
