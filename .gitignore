@@ -22,6 +22,8 @@ build/
 dist/
 dist.zip
 *.spec
+!TestCraftGoo.spec
+!TestCraftGoo_onefile.spec
 
 # Local runtime data (machine-specific)
 logs/

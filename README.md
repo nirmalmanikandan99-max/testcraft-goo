@@ -216,11 +216,20 @@ venv\Scripts\python -m pytest tests -q
 
 ## 🔧 Desktop (Offline) Build
 
+**Already built:** the latest single-file EXE ships in the repo at
+**`artifacts/TestCraftGoo.exe`** (~96 MB) — double-click it; a browser tab
+opens with the app. Works offline with local Ollama, and also supports the
+online engines when you have a key.
+
+Rebuild it yourself (needs PyInstaller in the venv):
+
 ```powershell
-venv\Scripts\python -m PyInstaller TestCraftGoo.spec
+venv\Scripts\python -m PyInstaller --clean --noconfirm TestCraftGoo_onefile.spec
+Copy-Item dist\TestCraftGoo.exe artifacts\TestCraftGoo.exe -Force
 ```
 
-Double-click `dist\TestCraftGoo\TestCraftGoo.exe` → opens the app in your browser. Requires local Ollama with `qwen2.5:7b` — see [OLLAMA_SETUP_GUIDE.md](OLLAMA_SETUP_GUIDE.md).
+The onedir variant (`TestCraftGoo.spec`, the old multi-file folder build)
+is still supported — see [OLLAMA_SETUP_GUIDE.md](OLLAMA_SETUP_GUIDE.md).
 
 ---
 

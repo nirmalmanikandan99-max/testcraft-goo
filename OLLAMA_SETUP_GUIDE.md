@@ -65,8 +65,9 @@ You should see `qwen2.5:7b` in the list.
 
 ### Option A — Desktop App (EXE)
 
-1. Copy the entire **`TestCraftGoo`** folder to your computer (keep all
-   files inside it together — the `.exe` needs its neighboring files).
+1. Download **`TestCraftGoo.exe`** from the repository's **`artifacts/`** folder
+   (GitHub → the project → `artifacts/TestCraftGoo.exe`). It's a single file —
+   no other files needed next to it.
 2. Double-click **`TestCraftGoo.exe`**.
 3. A browser tab opens automatically at `http://localhost:8501` — that's
    the app.
@@ -123,5 +124,5 @@ browser.
 
 ## 7. Uninstalling
 
-- **TestCraft Goo:** Just delete the `TestCraftGoo` folder.
+- **TestCraft Goo:** Just delete `TestCraftGoo.exe`.
 - **Ollama:** Uninstall via Windows Settings → Apps, like any other program.

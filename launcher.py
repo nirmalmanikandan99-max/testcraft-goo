@@ -16,8 +16,15 @@ from streamlit.web import cli as stcli
 
 
 def _app_base_dir():
-    """Directory containing app.py — the exe's own folder when frozen."""
+    """Directory containing app.py.
+
+    - onefile build: bundled files are extracted to sys._MEIPASS at runtime
+    - onedir build: app.py sits next to the exe
+    - source run: the project folder
+    """
     if getattr(sys, "frozen", False):
+        if hasattr(sys, "_MEIPASS"):
+            return sys._MEIPASS
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
