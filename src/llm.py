@@ -30,9 +30,12 @@ from src.config import (
     OPENROUTER_MODEL,
 )
 
-# Batched per-technique generation produces large arrays; free-tier upstream
-# providers stream slowly, so allow a generous read window before giving up.
+# Batched per-technique generation produces large arrays; the httpx read
+# timeout is per socket-read, so a trickling free-tier upstream could keep a
+# call (and the pipeline) alive for many minutes. CALL_TIME_BUDGET bounds the
+# whole call instead — a batch either answers in time or is skipped.
 DEFAULT_TIMEOUT = 240.0
+CALL_TIME_BUDGET = 180.0
 
 # Usage events collected from every successful provider call in the current
 # pipeline run (model used, token counts, rate-limit headers). Cleared by
@@ -199,6 +202,7 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
     tried_models = []
     candidates = _model_candidates(config)
     saw_429 = False
+    call_start = time.time()
 
     for model in candidates:
         tried_models.append(model)
@@ -207,6 +211,13 @@ def _call_http_provider(config, prompt, temperature, num_predict, system=None, j
         transient_attempts = 0
 
         while True:
+            if time.time() - call_start > CALL_TIME_BUDGET:
+                raise LLMError(
+                    f"{config.provider} did not respond within "
+                    f"{int(CALL_TIME_BUDGET)}s — the free tier is congested "
+                    "right now. Wait a minute and retry."
+                )
+
             body = {
                 "model": model,
                 "messages": _build_messages(prompt, system),

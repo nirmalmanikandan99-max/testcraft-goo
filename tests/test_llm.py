@@ -329,6 +329,20 @@ def test_429_respects_retry_after_header():
     assert mocked_sleep.call_args.args[0] == 3.0
 
 
+def test_call_time_budget_aborts_slow_provider():
+    with mock.patch.object(llm.time, "time", side_effect=[0.0, 9999.0]):
+        with mock.patch.object(llm.httpx, "post") as mocked_post:
+            raised = False
+            try:
+                llm.chat(LLMConfig(provider="openrouter", api_key="k"), "Hi")
+            except llm.LLMError as exc:
+                raised = True
+                assert "did not respond within" in str(exc)
+
+    assert raised
+    assert mocked_post.call_count == 0
+
+
 def test_connect_error_raises_friendly_error():
     with mock.patch.object(
         llm.httpx,

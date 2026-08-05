@@ -931,17 +931,23 @@ TEST CASE FORMAT
                     if batch_index > 1:
                         time.sleep(6)
 
-                    cases, _raw = _stage_with_retry(
-                        lambda hint, b=batch: generate_testcases_for_techniques(
-                            requirement_json,
-                            b,
-                            test_case_format,
-                            llm_config,
-                            retry_hint=hint,
-                        ),
-                        status,
-                        f"Test case generation (batch {batch_index}/{len(batches)})",
-                    )
+                    try:
+                        cases, _raw = _stage_with_retry(
+                            lambda hint, b=batch: generate_testcases_for_techniques(
+                                requirement_json,
+                                b,
+                                test_case_format,
+                                llm_config,
+                                retry_hint=hint,
+                            ),
+                            status,
+                            f"Test case generation (batch {batch_index}/{len(batches)})",
+                        )
+                    except LLMError as exc:
+                        st.warning(
+                            f"⚠️ Skipping batch {batch_index}: {exc}"
+                        )
+                        continue
 
                     if cases is None:
                         st.warning(
