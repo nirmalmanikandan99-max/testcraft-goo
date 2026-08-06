@@ -429,6 +429,7 @@ with st.sidebar:
         type=["pdf", "docx", "txt"],
         label_visibility="collapsed"
     )
+    st.caption("Optional — you can generate test cases from the User Story alone.")
 
     if fd is not None:
         with st.spinner("Reading document..."):
@@ -807,10 +808,7 @@ def _build_generation_log(usage_sections, story_title, test_case_format, account
 
 if generate_clicked:
 
-    if fd is None:
-        st.error("⚠️ Please upload the Functional Document from the sidebar.")
-
-    elif story_title.strip() == "":
+    if story_title.strip() == "":
         st.error("⚠️ Please enter the User Story Title.")
 
     elif acceptance.strip() == "":
@@ -829,20 +827,31 @@ NAVIGATION STEPS
 
 """
 
-        complete_context = f"""
+        document_block = ""
+        if document_text:
+            document_block = f"""
 ===========================
 FUNCTIONAL DOCUMENT
 ===========================
 
 {document_text}
 
+"""
+        else:
+            document_block = ""
+
+        support_block = ""
+        if supporting_document_text:
+            support_block = f"""
 ===========================
 SUPPORTING DOCUMENTS
 ===========================
 
 {supporting_document_text}
 
-===========================
+"""
+
+        complete_context = f"""{document_block}{support_block}===========================
 USER STORY
 ===========================
 
